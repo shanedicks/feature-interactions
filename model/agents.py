@@ -22,16 +22,21 @@ class Agent(Agent):
         model: "World", 
         traits: Dict["Feature", str],
         utils: float,
+        trait_mutation_chance: float = 0.02,
+        new_trait_chance: float = 0.002
     ) -> None:
         super().__init__(unique_id, model)
         self.utils = utils
         self.traits = traits
+        self.trait_mutation_chance = trait_mutation_chance
+        self.new_trait_chance = new_trait_chance
 
     def get_interactions(self) -> List["Interaction"]:
         interactions = self.model.interactions.values()
         features = [f for f in self.traits.keys()]
         return [
-            x for x 
+            x
+            for x 
             in interactions 
             if x.initiator in features
         ]
@@ -42,8 +47,49 @@ class Agent(Agent):
             i.do_interaction(init_agent=self)
             print(self, self.utils)
 
+    def reproduce(self) -> None:
+        model = self.model
+        new_agent = Agent(
+            unique_id = model.next_id(),
+            model = model,
+            utils = model.base_utils,
+            traits = self.traits,
+        )
+        model.schedule.add(new_agent)
+        if model.random.random() <= self.trait_mutation_chance:
+            feature = model.random.choice(list(new_agent.traits))
+            new_values = [
+                x
+                for x
+                in feature.values
+                if x != new_agent.traits[feature]
+            ]
+            new_agent.traits[feature] = model.random.choice(new_values)
+        if model.random.random() <= self.new_trait_chance:
+            features = [
+                f
+                for f
+                in model.features.values()
+                if f.env is False and f not in new_agent.features
+            ]
+            if len(features) > 0:
+                feature = model.random.choice(features)
+            else:
+                feature = model.create_feature()
+            new_agent.traits[feature] = model.random.choice(feature)
+        return
+
+    def die(self) -> None:
+        self.model.schedule.remove(self)
+
     def step(self):
-        pass
+        if self.utils >= 0:
+            self.interact()
+            if self.utils > len(self.traits):
+                self.reproduce()
+        else:
+            self.die()
+
 
     def __repr__(self) -> str:
         return "Agent {}".format(self.unique_id)
@@ -125,7 +171,7 @@ class Interaction:
                 agent = init_agent
             )
         else:
-            target_agent = target
+            target_agent = target_agent
         i_value = init_agent.traits[self.initiator]
         t_value = target_agent.traits[self.target]
         payoff = self.payoffs[i_value][t_value]
