@@ -1,6 +1,9 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from random import Random
 from mesa import Agent
+
+Payoff = Tuple[float, float]
+PayoffDict = Dict[str, Dict[str, Payoff]]
 
 def name_from_number(num: int, lower: bool = True):
     if lower:
@@ -41,77 +44,79 @@ class Interaction:
         model: "World",
         initiator: Feature,
         target: Feature,
-        payoffs: Dict[str, Dict[str, Tuple[float, float]]] = None
+        trait_utility_random: bool = False,
+        trait_payoff_mod: float = 0.25,
+        payoffs: PayoffDict = None
     ) -> None:
         self.model = model
         self.random = model.random
         self.initiator = initiator
         self.target = target
+        self.trait_payoff_mod = trait_payoff_mod
+        assert trait_payoff_mod <= 1.0
         if payoffs is None:
-            self.payoffs = {}
-            for i_value in self.initiator.values:
-                self.payoffs[i_value] = {}
-                for t_value in self.target.values:
-                    i, t = round(self.random.uniform(-1, 1), 2), round(self.random.uniform(-1, 1), 2)
-                    self.payoffs[i_value][t_value] = (i, t)
+            self.payoffs = self.construct_payoffs(random=trait_utility_random)
         else:
             self.payoffs = payoffs
+
+    def construct_payoffs(self, random:bool) -> PayoffDict:
+        payoffs = {}
+        mod = self.trait_payoff_mod
+        anchor = 1 - mod
+        i_anchor = round(self.random.uniform(-anchor, anchor), 2)
+        t_anchor = round(self.random.uniform(-anchor, anchor), 2)
+        print(self, i_anchor, t_anchor)
+        for i_value in self.initiator.values:
+            payoffs[i_value] = {}
+            for t_value in self.target.values:
+                i = round(i_anchor + self.random.uniform(-mod, mod), 2)
+                assert i <= 1.0 and i >= -1.0
+                t = round(t_anchor + self.random.uniform(-mod, mod), 2)
+                assert t <= 1.0 and t >= -1.0
+                payoffs[i_value][t_value] = (i, t)
+        return payoffs
 
     def get_interactor(
         self,
         feature: Feature,
-        agent: Agent = None
-    ) -> Agent:
-        agents = self.model.schedule.agents
-        if agent is None:
-            choices = [x for x in agents if feature in x.traits]
-        else:
-            choices = [
-                x
-                for x
-                in agents
-                if x is not agent and feature in x.traits
+        agent: Agent
+    ) -> Optional[Agent]:
+        choices = [
+            x
+            for x
+            in self.model.grid.get_cell_list_contents([agent.pos])
+            if x is not agent and feature in x.traits and x.utils >= 0
         ]
-        return self.random.choice(choices)
+        if len(choices) > 0:
+            return self.random.choice(choices)
+        else:
+            return None
 
-    def agent_interaction(
-        self,
-        init_agent: Agent = None,
-        target_agent: Agent = None
-    ) -> None:
-        if init_agent is None:
-            init_agent = self.get_interactor(feature = self.initiator)
-        else:
-            init_agent = init_agent
-        if target_agent is None:
-            target_agent = self.get_interactor(
-                feature = self.target,
-                agent = init_agent
-            )
-        else:
-            target_agent = target_agent
-        i_value = init_agent.traits[self.initiator]
-        t_value = target_agent.traits[self.target]
-        payoff = self.payoffs[i_value][t_value]
-        init_agent.utils += payoff[0]
-        target_agent.utils += payoff[1]
+    def agent_interaction(self, init_agent: Agent) -> None:
+        target_agent = self.get_interactor(
+            feature = self.target,
+            agent = init_agent
+        )
+        if target_agent is not None:
+            i_value = init_agent.traits[self.initiator]
+            t_value = target_agent.traits[self.target]
+            payoff = self.payoffs[i_value][t_value]
+            init_agent.utils += payoff[0]
+            target_agent.utils += payoff[1]
 
     def env_interaction(self, init_agent: Agent) -> None:
-        if init_agent is None:
-            init_agent = self.get_interactor(self.initiator)
         i_value = init_agent.traits[self.initiator]
         t_value = self.random.choice(self.target.values)
         init_agent.utils += self.payoffs[i_value][t_value][0]
 
     def do_interaction(
         self,
-        init_agent: Agent = None,
-        target_agent: Agent = None
+        init_agent: Agent,
     ) -> None:
         if self.target.env == True:
             self.env_interaction(init_agent)
         else:
-            self.agent_interaction(init_agent, target_agent)
+            self.agent_interaction(init_agent)
 
     def __repr__(self) -> str:
         return "{0}>{1}".format(
@@ -125,10 +130,10 @@ class Agent(Agent):
         self,
         unique_id: int,
         model: "World",
-        traits: Dict["Feature", str],
+        traits: Dict[Feature, str],
         utils: float,
         trait_mutation_chance: float = 0.1,
-        new_trait_chance: float = 0.02
+        new_trait_chance: float = 0.01
     ) -> None:
         super().__init__(unique_id, model)
         self.utils = utils
@@ -138,7 +143,7 @@ class Agent(Agent):
         self.interactions = self.get_interactions()
         self.age = 0
 
-    def get_interactions(self) -> List["Interaction"]:
+    def get_interactions(self) -> List[Interaction]:
         features = [f for f in self.traits.keys()]
         return [
             x[2]
@@ -162,7 +167,6 @@ class Agent(Agent):
                     if x != new_traits[feature]
                 ]
                 new_traits[feature] = model.random.choice(new_values)
-                print("Trait Mutation in {0}: {1}->{2}".format(feature, self.traits[feature], new_traits[feature]))
         if model.random.random() <= self.new_trait_chance:
             features = [
                 f
@@ -174,9 +178,6 @@ class Agent(Agent):
             feature = model.random.choice(features)
             if feature == 'new':
                 feature = model.create_feature()
-                print("Feature aquired - new feature {}".format(feature))
-            else:
-                print("Feature aquired- existing feature {}".format(feature))
             new_traits[feature] = model.random.choice(feature.values)
         new_agent = Agent(
             unique_id = model.next_id(),
@@ -186,6 +187,7 @@ class Agent(Agent):
         )
         #print("Reproduction! Welcome {new_agent}".format(new_agent=new_agent.unique_id))
         model.schedule.add(new_agent)
+        model.grid.place_agent(new_agent, self.pos)
         return
 
     def die(self) -> None:

@@ -9,6 +9,18 @@ from mesa.time import RandomActivation
 
 from agents import Agent, Feature, Interaction
 
+def get_population(world):
+    return len(world.schedule.agents)
+
+def get_total_utility(world):
+    return sum([a.utils for a in world.schedule.agents])
+
+def get_avg_utility(world):
+    total = get_total_utility(world)
+    population = get_population(world)
+    avg = total / population if population > 0 else 0
+    return avg
+
 
 class World(Model):
 
@@ -20,15 +32,28 @@ class World(Model):
         num_feature_interactions: int = 5,
         initial_agents: int = 100,
         num_agent_traits: int = 2,
-        base_utils: float = 0.0
+        base_utils: float = 0.0,
+        grid_size: int = 2,
     ) -> None:
         super().__init__()
         self.feature_interactions = feature_interactions
         self.base_utils = base_utils
         self.num_agent_traits = num_agent_traits
         self.num_feature_interactions = num_feature_interactions
+        self.grid_size = grid_size
+        self.grid = MultiGrid(grid_size, grid_size, True)
         self.schedule = RandomActivation(self)
-        self.datacollecter = DataCollector()
+        self.datacollector = DataCollector(
+            model_reporters = {
+                "Pop": get_population,
+                "Total Utility": get_total_utility,
+                "Avg Utility": get_avg_utility
+            },
+            agent_reporters = {
+                "Utils": lambda agent: agent.utils,
+                "Age": lambda agent: agent.age
+            }
+        )
         if self.feature_interactions is None:
             self.current_feature_id = 0
             self.feature_interactions = nx.DiGraph()
@@ -41,6 +66,9 @@ class World(Model):
         for i in range(initial_agents):
             agent = self.create_agent(num_traits = num_agent_traits)
             self.schedule.add(agent)
+            x = self.random.randrange(self.grid_size)
+            y = self.random.randrange(self.grid_size)
+            self.grid.place_agent(agent, (x, y))
         return
 
     def next_feature_id(self) -> int:
@@ -54,7 +82,7 @@ class World(Model):
         self,
         initiator: Feature,
     ) -> None:
-        extant_targets = self.feature_interactions.neighbors(initiator)
+        extant_targets = list(self.feature_interactions.neighbors(initiator))
         target_choices = [
             x
             for x
@@ -113,41 +141,39 @@ class World(Model):
         )
         return agent
 
-    def draw_feature_interactions(self):
-        g = self.feature_interactions
-        pos = nx.circular_layout(g)
-        labels = {n: n.name for n in pos.keys()}
-        nx.draw_networkx_nodes(g, pos, nodelist=self.get_features_list(env=False), node_color="tab:blue")
-        nx.draw_networkx_nodes(g, pos, nodelist=self.get_features_list(env=True), node_color="tab:green")
-        nx.draw_networkx_edges(g, pos)
-        nx.draw_networkx_labels(g, pos, labels)
-        plt.show()
-
-    def draw_utility_hist(self):
-        agent_fitness = [a.utils for a in self.schedule.agents]
-        plt.hist(agent_fitness)
-        plt.show()
-
-    def draw_features_hist(self):
-        num_features = [len(a.traits) for a in self.schedule.agents]
-        plt.hist(num_features)
-        plt.show()
-
-    def draw_age_hist(self):
-        ages = [a.age for a in self.schedule.agents]
-        plt.hist(ages)
-        plt.show()
-
-    def feature_distribution(self):
-        for feature in self.get_features_list():
-            agents = [a for a in self.schedule.agents if feature in a.traits]
-            traits = {v: len([a for a in agents if a.traits[feature] == v]) for v in feature.values}
-            print(feature, len(agents))
-            print(traits)
-
     def step(self):
         self.schedule.step()
         print("Step{0} - {1} agents".format(self.schedule.time,len(self.schedule.agents)))
-        self.datacollecter.collect(self)
+        self.datacollector.collect(self)
 
+def draw_feature_interactions(world):
+    g = world.feature_interactions
+    pos = nx.circular_layout(g)
+    labels = {n: n.name for n in pos.keys()}
+    nx.draw_networkx_nodes(g, pos, nodelist=world.get_features_list(env=False), node_color="tab:blue")
+    nx.draw_networkx_nodes(g, pos, nodelist=world.get_features_list(env=True), node_color="tab:green")
+    nx.draw_networkx_edges(g, pos)
+    nx.draw_networkx_labels(g, pos, labels)
+    plt.show()
 
+def draw_utility_hist(world):
+    agent_fitness = [a.utils for a in world.schedule.agents]
+    plt.hist(agent_fitness)
+    plt.show()
+
+def draw_features_hist(world):
+    num_features = [len(a.traits) for a in world.schedule.agents]
+    plt.hist(num_features)
+    plt.show()
+
+def draw_age_hist(world):
+    ages = [a.age for a in world.schedule.agents]
+    plt.hist(ages)
+    plt.show()
+
+def feature_distribution(world):
+    for feature in world.get_features_list():
+        agents = [a for a in world.schedule.agents if feature in a.traits]
+        traits = {v: len([a for a in agents if a.traits[feature] == v]) for v in feature.values}
+        print(feature, len(agents))
+        print(traits)
