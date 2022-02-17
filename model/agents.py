@@ -105,9 +105,13 @@ class Interaction:
             target_agent.utils += payoff[1]
 
     def env_interaction(self, init_agent: Agent) -> None:
+        site = self.model.sites[init_agent.pos]
         i_value = init_agent.traits[self.initiator]
-        t_value = self.random.choice(self.target.values)
-        init_agent.utils += self.payoffs[i_value][t_value][0]
+        if self.target in site.traits and site.utils[self.target] > 0:
+            t_value = site.traits[self.target]
+            payoff = self.payoffs[i_value][t_value]
+            init_agent.utils += payoff[0]
+            site.utils[self.target] += payoff[1]
 
     def do_interaction(
         self,
@@ -153,7 +157,8 @@ class Agent(Agent):
 
     def interact(self) -> None:
         for i in self.interactions:
-            i.do_interaction(init_agent=self)
+            if self.utils >= 0:
+                i.do_interaction(init_agent=self)
 
     def reproduce(self) -> None:
         model = self.model
@@ -182,7 +187,7 @@ class Agent(Agent):
         new_agent = Agent(
             unique_id = model.next_id(),
             model = model,
-            utils = model.base_utils,
+            utils = model.base_agent_utils,
             traits = new_traits,
         )
         #print("Reproduction! Welcome {new_agent}".format(new_agent=new_agent.unique_id))
@@ -194,13 +199,13 @@ class Agent(Agent):
         self.model.schedule.remove(self)
 
     def step(self):
-        if self.utils >= 0:
-            self.interact()
-            if self.utils > len(self.traits):
-                self.reproduce()
-            self.age += 1
-        else:
+        self.interact()
+        if self.utils > len(self.traits):
+            self.reproduce()
+        if self.utils < 0:
             self.die()
+        else:
+            self.age += 1
 
     def __repr__(self) -> str:
         return "Agent {}".format(self.unique_id)

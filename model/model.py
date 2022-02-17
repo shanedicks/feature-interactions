@@ -22,24 +22,52 @@ def get_avg_utility(world):
     return avg
 
 
+class Site:
+
+    def __init__(
+        self,
+        model: "World",
+        pos: Tuple[int, int]
+    ) -> None:
+        self.model = model
+        self.random = model.random
+        self.pos = pos
+        self.traits = {}
+        self.utils = {}
+        env_features = self.model.get_features_list(env=True)
+        num_traits = self.random.randrange(len(env_features) + 1)
+        features = self.random.sample(env_features, num_traits)
+        for feature in features:
+            self.traits[feature] = self.random.choice(feature.values)
+            self.utils[feature] = self.model.base_env_utils
+
+    def reset(self):
+        for feature in self.utils:
+            self.utils[feature] = self.model.base_env_utils
+
+    def __repr__(self) -> str:
+        return "Site {0}".format(self.pos)
+
+
 class World(Model):
 
     def __init__(
         self,
         feature_interactions: nx.digraph.DiGraph = None,
-        num_env_features: int = 2,
-        num_agent_features: int = 4,
-        num_feature_interactions: int = 5,
-        initial_agents: int = 100,
+        init_env_features: int = 2,
+        init_agent_features: int = 4,
+        init_agents: int = 100,
         num_agent_traits: int = 2,
-        base_utils: float = 0.0,
-        grid_size: int = 2,
+        base_agent_utils: float = 0.0,
+        base_env_utils: float = 10.0,
+        grid_size: int = 3,
     ) -> None:
         super().__init__()
         self.feature_interactions = feature_interactions
-        self.base_utils = base_utils
+        self.base_agent_utils = base_agent_utils
+        self.base_env_utils = base_env_utils
         self.num_agent_traits = num_agent_traits
-        self.num_feature_interactions = num_feature_interactions
+        self.max_feature_interactions = init_env_features + init_agent_features
         self.grid_size = grid_size
         self.grid = MultiGrid(grid_size, grid_size, True)
         self.schedule = RandomActivation(self)
@@ -57,19 +85,23 @@ class World(Model):
         if self.feature_interactions is None:
             self.current_feature_id = 0
             self.feature_interactions = nx.DiGraph()
-            for i in range(num_env_features):
+            for i in range(init_env_features):
                 self.create_feature(env = True)
-            for i in range(num_agent_features):
+            for i in range(init_agent_features):
                 self.create_feature()
         else:
             self.current_feature_id = len(self.feature_interactions.number_of_nodes())
-        for i in range(initial_agents):
+        self.sites = {}
+        for _, x, y in self.grid.coord_iter():
+            pos = (x,y)
+            site = Site(model=self, pos=pos)
+            self.sites[pos] = site
+        for i in range(init_agents):
             agent = self.create_agent(num_traits = num_agent_traits)
             self.schedule.add(agent)
             x = self.random.randrange(self.grid_size)
             y = self.random.randrange(self.grid_size)
             self.grid.place_agent(agent, (x, y))
-        return
 
     def next_feature_id(self) -> int:
         self.current_feature_id += 1
@@ -115,7 +147,7 @@ class World(Model):
         )
         self.feature_interactions.add_node(feature)
         if feature.env is False:
-            num_ints = self.random.randrange(1, self.num_feature_interactions)
+            num_ints = self.random.randrange(1, self.max_feature_interactions)
             for i in range(num_ints):
                 self.create_interaction(feature)
         return feature
@@ -126,7 +158,7 @@ class World(Model):
         utils:float = None,
     ) -> Agent:
         if utils is None:
-            utils = self.base_utils
+            utils = self.base_agent_utils
         traits = {}
         agent_features = self.get_features_list(env=False)
         features = self.random.sample(agent_features, num_traits)
@@ -145,6 +177,8 @@ class World(Model):
         self.schedule.step()
         print("Step{0} - {1} agents".format(self.schedule.time,len(self.schedule.agents)))
         self.datacollector.collect(self)
+        for site in self.sites.values():
+            site.reset()
 
 def draw_feature_interactions(world):
     g = world.feature_interactions
@@ -171,9 +205,13 @@ def draw_age_hist(world):
     plt.hist(ages)
     plt.show()
 
-def feature_distribution(world):
+def agent_features_distribution(world):
     for feature in world.get_features_list():
         agents = [a for a in world.schedule.agents if feature in a.traits]
         traits = {v: len([a for a in agents if a.traits[feature] == v]) for v in feature.values}
         print(feature, len(agents))
         print(traits)
+
+def env_features_distribution(world):
+    for site in world.sites.values():
+        print(site.traits)
