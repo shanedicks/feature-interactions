@@ -55,9 +55,8 @@ class World(Model):
         self,
         feature_interactions: nx.digraph.DiGraph = None,
         init_env_features: int = 2,
-        init_agent_features: int = 4,
+        init_agent_features: int = 1,
         init_agents: int = 100,
-        num_agent_traits: int = 2,
         base_agent_utils: float = 0.0,
         base_env_utils: float = 10.0,
         grid_size: int = 3,
@@ -66,7 +65,6 @@ class World(Model):
         self.feature_interactions = feature_interactions
         self.base_agent_utils = base_agent_utils
         self.base_env_utils = base_env_utils
-        self.num_agent_traits = num_agent_traits
         self.max_feature_interactions = init_env_features + init_agent_features
         self.grid_size = grid_size
         self.grid = MultiGrid(grid_size, grid_size, True)
@@ -97,7 +95,8 @@ class World(Model):
             site = Site(model=self, pos=pos)
             self.sites[pos] = site
         for i in range(init_agents):
-            agent = self.create_agent(num_traits = num_agent_traits)
+            num_traits = self.random.randrange(1, init_agent_features + 1)
+            agent = self.create_agent(num_traits = num_traits)
             self.schedule.add(agent)
             x = self.random.randrange(self.grid_size)
             y = self.random.randrange(self.grid_size)
@@ -161,6 +160,7 @@ class World(Model):
             utils = self.base_agent_utils
         traits = {}
         agent_features = self.get_features_list(env=False)
+        print(num_traits, agent_features)
         features = self.random.sample(agent_features, num_traits)
         for feature in features:
             value = self.random.choice(feature.values)
