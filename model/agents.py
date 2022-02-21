@@ -1,9 +1,10 @@
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 from random import Random
 from mesa import Agent
 
 Payoff = Tuple[float, float]
 PayoffDict = Dict[str, Dict[str, Payoff]]
+Position = Tuple["Interaction", str]
 
 def name_from_number(num: int, lower: bool = True):
     if lower:
@@ -65,7 +66,6 @@ class Interaction:
         anchor = 1 - mod
         i_anchor = round(self.random.uniform(-anchor, anchor), 2)
         t_anchor = round(self.random.uniform(-anchor, anchor), 2)
-        print(self, i_anchor, t_anchor)
         for i_value in self.initiator.values:
             payoffs[i_value] = {}
             for t_value in self.target.values:
@@ -76,7 +76,7 @@ class Interaction:
                 payoffs[i_value][t_value] = (i, t)
         return payoffs
 
-    def get_interactor(
+    def get_agent_target(
         self,
         feature: Feature,
         agent: Agent
@@ -84,7 +84,7 @@ class Interaction:
         choices = [
             x
             for x
-            in self.model.grid.get_cell_list_contents([agent.pos])
+            in self.model.grid.get_cell_list_contents(agent.pos)
             if x is not agent and feature in x.traits and x.utils >= 0
         ]
         if len(choices) > 0:
@@ -92,35 +92,29 @@ class Interaction:
         else:
             return None
 
-    def agent_interaction(self, init_agent: Agent) -> None:
-        target_agent = self.get_interactor(
-            feature = self.target,
-            agent = init_agent
-        )
-        if target_agent is not None:
-            i_value = init_agent.traits[self.initiator]
-            t_value = target_agent.traits[self.target]
-            payoff = self.payoffs[i_value][t_value]
-            init_agent.utils += payoff[0]
-            target_agent.utils += payoff[1]
-
-    def env_interaction(self, init_agent: Agent) -> None:
-        site = self.model.sites[init_agent.pos]
-        i_value = init_agent.traits[self.initiator]
-        if self.target in site.traits and site.utils[self.target] > 0:
-            t_value = site.traits[self.target]
-            payoff = self.payoffs[i_value][t_value]
-            init_agent.utils += payoff[0]
-            site.utils[self.target] += payoff[1]
-
-    def do_interaction(
-        self,
-        init_agent: Agent,
-    ) -> None:
+    def do_interaction(self, init_agent: Agent) -> None:
         if self.target.env == True:
-            self.env_interaction(init_agent)
+            site = self.model.sites[init_agent.pos]
+            i_value = init_agent.traits[self.initiator]
+            if self.target in site.traits and site.utils[self.target] > 0:
+                t_value = site.traits[self.target]
+                payoff = self.payoffs[i_value][t_value]
+                init_agent.idle = False
+                init_agent.utils += payoff[0]
+                site.utils[self.target] += payoff[1]
         else:
-            self.agent_interaction(init_agent)
+            target_agent = self.get_agent_target(
+                feature = self.target,
+                agent = init_agent
+            )
+            if target_agent is not None:
+                i_value = init_agent.traits[self.initiator]
+                t_value = target_agent.traits[self.target]
+                payoff = self.payoffs[i_value][t_value]
+                init_agent.idle = False
+                target_agent.idle = False
+                init_agent.utils += payoff[0]
+                target_agent.utils += payoff[1]
 
     def __repr__(self) -> str:
         return "{0}>{1}".format(
@@ -148,14 +142,38 @@ class Agent(Agent):
         self.feature_gain_chance = feature_gain_chance
         self.interactions = self.get_interactions()
         self.age = 0
+        self.idle = True
+        self.role = self.get_role()
 
-    def get_interactions(self) -> List[Interaction]:
+    def get_interactions(self, out: bool = True) -> List[Interaction]:
         features = [f for f in self.traits.keys()]
-        return [
-            x[2]
-            for x
-            in self.model.feature_interactions.edges(nbunch=features, data='object')
-        ]
+        if out:
+            return [
+                x[2]
+                for x
+                in self.model.feature_interactions.edges(
+                    nbunch=features,
+                    data='interaction'
+                )
+            ]
+        else:
+            return [
+                x[2]
+                for x
+                in self.model.feature_interactions.in_edges(
+                    nbunch=features,
+                    data='interaction'
+                )
+            ]
+
+    def get_role(self) -> Set[Position]:
+        i_positions = self.get_interactions()
+        t_positions = self.get_interactions(out=False)
+        role = {(i, 'i') for i in i_positions}
+        for t in t_positions:
+            role.add((t, 't'))
+        return role
+
 
     def interact(self) -> None:
         for i in self.interactions:
@@ -198,6 +216,14 @@ class Agent(Agent):
             self.model.schedule.add(new_agent)
             self.model.grid.place_agent(new_agent, self.pos)
 
+    def move(self) -> None:
+        neighborhood = self.model.grid.get_neighborhood(
+                self.pos,
+                moore=True,
+                include_center=False
+            )
+        new_position = self.random.choice(neighborhood)
+        self.model.grid.move_agent(self, new_position)
 
     def die(self) -> None:
         self.model.schedule.remove(self)
@@ -207,10 +233,12 @@ class Agent(Agent):
         self.interact()
         if self.utils > len(self.traits):
             self.reproduce()
-        if self.utils < 0:
+        if self.utils <= 0:
             self.die()
         else:
             self.age += 1
+            if self.idle:
+                self.move()
 
     def __repr__(self) -> str:
         return "Agent {}".format(self.unique_id)

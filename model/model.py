@@ -1,6 +1,6 @@
 from typing import Dict, List, Tuple
 import random
-import networkx as nx
+
 import matplotlib.pyplot as plt
 from mesa import Model
 from mesa.datacollection import DataCollector
@@ -8,19 +8,7 @@ from mesa.space import MultiGrid
 from mesa.time import RandomActivation
 
 from agents import Agent, Feature, Interaction
-
-def get_population(world):
-    return len(world.schedule.agents)
-
-def get_total_utility(world):
-    return sum([a.utils for a in world.schedule.agents])
-
-def get_avg_utility(world):
-    total = get_total_utility(world)
-    population = get_population(world)
-    avg = total / population if population > 0 else 0
-    return avg
-
+from output import *
 
 class Site:
 
@@ -54,18 +42,22 @@ class World(Model):
     def __init__(
         self,
         feature_interactions: nx.digraph.DiGraph = None,
-        init_env_features: int = 2,
-        init_agent_features: int = 1,
+        init_env_features: int = 3,
+        init_agent_features: int = 3,
+        max_feature_interactions: int = 4,
         init_agents: int = 100,
         base_agent_utils: float = 0.0,
-        base_env_utils: float = 10.0,
+        base_env_utils: float = 1.0,
         grid_size: int = 3,
     ) -> None:
         super().__init__()
         self.feature_interactions = feature_interactions
         self.base_agent_utils = base_agent_utils
         self.base_env_utils = base_env_utils
-        self.max_feature_interactions = init_env_features + init_agent_features
+        self.max_feature_interactions = min(
+            max_feature_interactions,
+            (init_env_features + init_agent_features)
+        )
         self.grid_size = grid_size
         self.grid = MultiGrid(grid_size, grid_size, True)
         self.schedule = RandomActivation(self)
@@ -77,7 +69,8 @@ class World(Model):
             },
             agent_reporters = {
                 "Utils": lambda agent: agent.utils,
-                "Age": lambda agent: agent.age
+                "Age": lambda agent: agent.age,
+                "Traits": lambda agent: len(agent.traits)
             }
         )
         if self.feature_interactions is None:
@@ -130,7 +123,7 @@ class World(Model):
             self.feature_interactions.add_edge(
                 interaction.initiator,
                 interaction.target,
-                object = interaction
+                interaction = interaction
             )
         return
 
@@ -160,7 +153,6 @@ class World(Model):
             utils = self.base_agent_utils
         traits = {}
         agent_features = self.get_features_list(env=False)
-        print(num_traits, agent_features)
         features = self.random.sample(agent_features, num_traits)
         for feature in features:
             value = self.random.choice(feature.values)
@@ -174,44 +166,11 @@ class World(Model):
         return agent
 
     def step(self):
+        for site in self.sites.values():
+            site.reset()
         self.schedule.step()
         print("Step{0} - {1} agents".format(self.schedule.time,len(self.schedule.agents)))
         self.datacollector.collect(self)
-        for site in self.sites.values():
-            site.reset()
 
-def draw_feature_interactions(world):
-    g = world.feature_interactions
-    pos = nx.circular_layout(g)
-    labels = {n: n.name for n in pos.keys()}
-    nx.draw_networkx_nodes(g, pos, nodelist=world.get_features_list(env=False), node_color="tab:blue")
-    nx.draw_networkx_nodes(g, pos, nodelist=world.get_features_list(env=True), node_color="tab:green")
-    nx.draw_networkx_edges(g, pos)
-    nx.draw_networkx_labels(g, pos, labels)
-    plt.show()
 
-def draw_utility_hist(world):
-    agent_fitness = [a.utils for a in world.schedule.agents]
-    plt.hist(agent_fitness)
-    plt.show()
 
-def draw_features_hist(world):
-    num_features = [len(a.traits) for a in world.schedule.agents]
-    plt.hist(num_features)
-    plt.show()
-
-def draw_age_hist(world):
-    ages = [a.age for a in world.schedule.agents]
-    plt.hist(ages)
-    plt.show()
-
-def agent_features_distribution(world):
-    for feature in world.get_features_list():
-        agents = [a for a in world.schedule.agents if feature in a.traits]
-        traits = {v: len([a for a in agents if a.traits[feature] == v]) for v in feature.values}
-        print(feature, len(agents))
-        print(traits)
-
-def env_features_distribution(world):
-    for site in world.sites.values():
-        print(site.traits)
