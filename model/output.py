@@ -25,6 +25,12 @@ def draw_feature_interactions(world):
     nx.draw_networkx_labels(g, pos, labels)
     plt.show()
 
+def draw_role_network(world):
+    g = nx.Digraph()
+    pos = nx.spring_layout(g)
+    nodes = set(occupied_roles_list(world))
+    nx.draw_networkx_nodes(g, pos, nodelist=nodes)
+
 def draw_utility_hist(world):
     agent_fitness = [a.utils for a in world.schedule.agents]
     plt.hist(agent_fitness)
@@ -64,7 +70,7 @@ def get_feature_by_name(world, name):
 def avg_payoff(interaction):
     i = [p[0] for item in interaction.payoffs.values() for p in item.values()]
     t = [p[1] for item in interaction.payoffs.values() for p in item.values()]
-    return(mean(i), mean(t))
+    return(round(mean(i),2), round(mean(t),2))
 
 def print_matrix(interaction):
     print(interaction)
@@ -85,11 +91,14 @@ def interaction_report(world, full: bool = False):
 			print(i, avg_payoff(i))
 
 def occupied_roles_list(world):
-	return [frozenset(a.role) for a in world.schedule.agents]
+	return list(set([frozenset(a.role) for a in world.schedule.agents]))
+
+def occupied_rolenames_list(world):
+    return list(set([a.rolename for a in world.schedule.agents]))
 
 def occupied_trait_set_list(world):
 	return [
-		frozenset({k,v for k,v in a.traits.items()}) 
+		frozenset({(k,v) for k,v in a.traits.items()}) 
 		for a 
 		in world.schedule.agents
 	]

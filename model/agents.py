@@ -24,15 +24,17 @@ class Feature:
     def __init__(
         self,
         feature_id: int,
-        num_values: int,
         env: bool,
+        num_values: int = 5
     ) -> None:
         self.name = name_from_number(feature_id, lower=False)
         self.env = env
         self.values = []
         for i in range(num_values):
-            value = name_from_number(i + 1)
-            self.values.append(value)
+            self.values.append(self.new_value())
+
+    def new_value(self):
+        return name_from_number(len(self.values) + 1)
 
     def __repr__(self) -> str:
         return self.name
@@ -54,27 +56,34 @@ class Interaction:
         self.initiator = initiator
         self.target = target
         self.trait_payoff_mod = trait_payoff_mod
+        self.anchors = self.set_anchors()
         assert trait_payoff_mod <= 1.0
         if payoffs is None:
             self.payoffs = self.construct_payoffs(random=trait_utility_random)
         else:
             self.payoffs = payoffs
 
+    def set_anchors(self):
+        anchor = 1 - self.trait_payoff_mod
+        i_anchor = round(self.random.uniform(-anchor, anchor), 2)
+        t_anchor = round(self.random.uniform(-anchor, anchor), 2)   
+        return {"i": i_anchor, "t": t_anchor}     
+
     def construct_payoffs(self, random:bool) -> PayoffDict:
         payoffs = {}
-        mod = self.trait_payoff_mod
-        anchor = 1 - mod
-        i_anchor = round(self.random.uniform(-anchor, anchor), 2)
-        t_anchor = round(self.random.uniform(-anchor, anchor), 2)
         for i_value in self.initiator.values:
             payoffs[i_value] = {}
             for t_value in self.target.values:
-                i = round(i_anchor + self.random.uniform(-mod, mod), 2)
-                assert i <= 1.0 and i >= -1.0
-                t = round(t_anchor + self.random.uniform(-mod, mod), 2)
-                assert t <= 1.0 and t >= -1.0
-                payoffs[i_value][t_value] = (i, t)
+                payoffs[i_value][t_value] = self.new_payoff(i_value, t_value)
         return payoffs
+
+    def new_payoff(self, i_value, t_value):
+        mod = self.trait_payoff_mod
+        i = round(self.anchors["i"] + self.random.uniform(-mod, mod), 2)
+        assert i <= 1.0 and i >= -1.0
+        t = round(self.anchors["t"] + self.random.uniform(-mod, mod), 2)
+        assert t <= 1.0 and t >= -1.0
+        return (i, t)
 
     def get_agent_target(
         self,
@@ -112,12 +121,11 @@ class Interaction:
                 t_value = target_agent.traits[self.target]
                 payoff = self.payoffs[i_value][t_value]
                 init_agent.idle = False
-                target_agent.idle = False
                 init_agent.utils += payoff[0]
                 target_agent.utils += payoff[1]
 
     def __repr__(self) -> str:
-        return "{0}>{1}".format(
+        return "{0}→{1}".format(
             self.initiator.name, 
             self.target.name
         )
@@ -174,6 +182,11 @@ class Agent(Agent):
             role.add((t, 't'))
         return role
 
+    @property
+    def rolename(self) -> str:
+        features = sorted([feature.name for feature in self.traits.keys()])
+        return "".join(features)
+
 
     def interact(self) -> None:
         for i in self.interactions:
@@ -181,37 +194,41 @@ class Agent(Agent):
                 i.do_interaction(init_agent=self)
 
     def reproduce(self) -> None:
-        new_traits = self.traits.copy()
-        for feature in new_traits:
+        child_traits = self.traits.copy()
+        for feature in child_traits:
             if self.random.random() <= self.trait_mutation_chance:
-                new_values = [
+                new_traits = [
                     x
                     for x
                     in feature.values
-                    if x != new_traits[feature]
+                    if x != child_traits[feature]
                 ]
-                new_traits[feature] = self.random.choice(new_values)
+                new_traits.append('new')
+                child_traits[feature] = self.random.choice(new_traits)
+                if child_traits[feature] == 'new':
+                    print("Novel Trait Mutation!")
+                    child_traits[feature] = self.model.create_trait(feature) 
         if self.random.random() <= self.feature_mutation_chance:
             if self.random.random() < self.feature_gain_chance:
                 features = [
                     f
                     for f
                     in self.model.feature_interactions.nodes
-                    if f.env is False and f not in new_traits
+                    if f.env is False and f not in child_traits
                 ]
                 features.append('new')
                 feature = self.random.choice(features)
                 if feature == 'new':
                     feature = self.model.create_feature()
-                new_traits[feature] = self.random.choice(feature.values)
+                child_traits[feature] = self.random.choice(feature.values)
             else:
-                new_traits.popitem()
-        if len(new_traits) > 0:
+                child_traits.popitem()
+        if len(child_traits) > 0:
             new_agent = Agent(
                 unique_id = self.model.next_id(),
                 model = self.model,
                 utils = self.model.base_agent_utils,
-                traits = new_traits,
+                traits = child_traits,
             )
             self.model.schedule.add(new_agent)
             self.model.grid.place_agent(new_agent, self.pos)

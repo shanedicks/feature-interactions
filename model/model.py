@@ -49,6 +49,7 @@ class World(Model):
         base_agent_utils: float = 0.0,
         base_env_utils: float = 1.0,
         grid_size: int = 3,
+        snap_interval: int = 20
     ) -> None:
         super().__init__()
         self.feature_interactions = feature_interactions
@@ -59,6 +60,7 @@ class World(Model):
             (init_env_features + init_agent_features)
         )
         self.grid_size = grid_size
+        self.snap_interval = snap_interval
         self.grid = MultiGrid(grid_size, grid_size, True)
         self.schedule = RandomActivation(self)
         self.datacollector = DataCollector(
@@ -127,14 +129,45 @@ class World(Model):
             )
         return
 
+    def create_trait(
+            self,
+            feature: Feature
+    ) -> str:
+        value = feature.new_value()
+        feature.values.append(value)
+        initated = [
+            x[2]
+            for x
+            in self.feature_interactions.edges(
+                nbunch=feature,
+                data='interaction'
+            )
+        ]
+        targeted = [
+            x[2]
+            for x
+            in self.feature_interactions.in_edges(
+                nbunch=feature,
+                data='interaction'
+            )
+        ]
+        for i in initated:
+            i.payoffs[value] = {}
+            for t_value in i.target.values:
+                i.payoffs[value][t_value] = i.new_payoff(value, t_value)
+        for t in targeted:
+            for i_value in t.initiator.values:
+                t.payoffs[i_value][value] = t.new_payoff(i_value, value)
+        print("New trait {0} added to feature {1}".format(value, feature))
+        return value
+
+
     def create_feature(self,
-        num_values: int = 5,
         env: bool = False
     ) -> Feature:
         feature_id = self.next_feature_id()
         feature = Feature(
             feature_id = feature_id, 
-            num_values = num_values, 
             env = env
         )
         self.feature_interactions.add_node(feature)
@@ -169,7 +202,14 @@ class World(Model):
         for site in self.sites.values():
             site.reset()
         self.schedule.step()
-        print("Step{0} - {1} agents".format(self.schedule.time,len(self.schedule.agents)))
+        print(
+            "Step{0}: {1} agents, {2} roles, {3} types".format(
+                self.schedule.time,
+                len(self.schedule.agents),
+                len(set(occupied_roles_list(self))),
+                len(set(occupied_trait_set_list(self))),
+            )
+        )
         self.datacollector.collect(self)
 
 
