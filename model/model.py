@@ -7,34 +7,97 @@ from mesa.datacollection import DataCollector
 from mesa.space import MultiGrid
 from mesa.time import RandomActivation
 
-from agents import Agent, Feature, Interaction
+from agents import Agent, Site
 from output import *
 
-class Site:
+Payoff = Tuple[float, float]
+PayoffDict = Dict[str, Dict[str, Payoff]]
+
+
+def name_from_number(num: int, lower: bool = True):
+    if lower:
+        char = 97
+    else:
+        char = 65
+    letters = ''
+    while num:
+        mod = (num - 1) % 26
+        letters += chr(mod + char)
+        num = (num - 1) // 26
+    return ''.join(reversed(letters))
+
+
+class Feature:
+
+    def __init__(
+        self,
+        feature_id: int,
+        env: bool,
+        num_values: int = 5
+    ) -> None:
+        self.name = name_from_number(feature_id, lower=False)
+        self.env = env
+        self.values = []
+        for i in range(num_values):
+            self.values.append(self.new_value())
+
+    def new_value(self):
+        return name_from_number(len(self.values) + 1)
+
+    def __repr__(self) -> str:
+        return self.name
+
+
+class Interaction:
 
     def __init__(
         self,
         model: "World",
-        pos: Tuple[int, int]
+        initiator: Feature,
+        target: Feature,
+        trait_utility_random: bool = False,
+        trait_payoff_mod: float = 0.25,
+        payoffs: PayoffDict = None
     ) -> None:
         self.model = model
         self.random = model.random
-        self.pos = pos
-        self.traits = {}
-        self.utils = {}
-        env_features = self.model.get_features_list(env=True)
-        num_traits = self.random.randrange(len(env_features) + 1)
-        features = self.random.sample(env_features, num_traits)
-        for feature in features:
-            self.traits[feature] = self.random.choice(feature.values)
-            self.utils[feature] = self.model.base_env_utils
+        self.initiator = initiator
+        self.target = target
+        self.trait_payoff_mod = trait_payoff_mod
+        self.anchors = self.set_anchors()
+        assert trait_payoff_mod <= 1.0
+        if payoffs is None:
+            self.payoffs = self.construct_payoffs(random=trait_utility_random)
+        else:
+            self.payoffs = payoffs
 
-    def reset(self):
-        for feature in self.utils:
-            self.utils[feature] = self.model.base_env_utils
+    def set_anchors(self):
+        anchor = 1 - self.trait_payoff_mod
+        i_anchor = round(self.random.uniform(-anchor, anchor), 2)
+        t_anchor = round(self.random.uniform(-anchor, anchor), 2)
+        return {"i": i_anchor, "t": t_anchor}
+
+    def construct_payoffs(self, random:bool) -> PayoffDict:
+        payoffs = {}
+        for i_value in self.initiator.values:
+            payoffs[i_value] = {}
+            for t_value in self.target.values:
+                payoffs[i_value][t_value] = self.new_payoff(i_value, t_value)
+        return payoffs
+
+    def new_payoff(self, i_value, t_value):
+        mod = self.trait_payoff_mod
+        i = round(self.anchors["i"] + self.random.uniform(-mod, mod), 2)
+        assert i <= 1.0 and i >= -1.0
+        t = round(self.anchors["t"] + self.random.uniform(-mod, mod), 2)
+        assert t <= 1.0 and t >= -1.0
+        return (i, t)
 
     def __repr__(self) -> str:
-        return "Site {0}".format(self.pos)
+        return "{0}→{1}".format(
+            self.initiator.name, 
+            self.target.name
+        )
 
 
 class World(Model):
@@ -45,10 +108,10 @@ class World(Model):
         init_env_features: int = 3,
         init_agent_features: int = 3,
         max_feature_interactions: int = 4,
-        init_agents: int = 100,
+        init_agents: int = 10,
         base_agent_utils: float = 0.0,
-        base_env_utils: float = 1.0,
-        grid_size: int = 3,
+        base_env_utils: float = 2.0,
+        grid_size: int = 1,
         snap_interval: int = 20
     ) -> None:
         super().__init__()
@@ -110,8 +173,7 @@ class World(Model):
     ) -> None:
         extant_targets = list(self.feature_interactions.neighbors(initiator))
         target_choices = [
-            x
-            for x
+            x for x
             in self.feature_interactions.nodes
             if x not in extant_targets
         ]
@@ -136,16 +198,14 @@ class World(Model):
         value = feature.new_value()
         feature.values.append(value)
         initated = [
-            x[2]
-            for x
+            x[2] for x
             in self.feature_interactions.edges(
                 nbunch=feature,
                 data='interaction'
             )
         ]
         targeted = [
-            x[2]
-            for x
+            x[2] for x
             in self.feature_interactions.in_edges(
                 nbunch=feature,
                 data='interaction'
