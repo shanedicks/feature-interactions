@@ -1,3 +1,4 @@
+from collections import Counter
 from typing import Dict, List, Tuple
 from statistics import mean
 import matplotlib.pyplot as plt
@@ -56,6 +57,10 @@ def agent_features_dist(world):
 def env_features_dist(world):
     for site in world.sites.values():
         print(site, site.traits)
+
+def role_dist(world):
+    c = Counter([a.rolename for a in world.schedule.agents])
+    return c.most_common(len(c))
 
 def env_report(world):
 	for site in world.sites.values():

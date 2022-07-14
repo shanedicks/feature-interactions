@@ -2,6 +2,7 @@ from typing import Dict, List, Tuple
 import random
 
 import matplotlib.pyplot as plt
+import numpy as np
 from mesa import Model
 from mesa.datacollection import DataCollector
 from mesa.space import MultiGrid
@@ -105,14 +106,15 @@ class World(Model):
     def __init__(
         self,
         feature_interactions: nx.digraph.DiGraph = None,
-        init_env_features: int = 3,
+        init_env_features: int = 5,
         init_agent_features: int = 3,
         max_feature_interactions: int = 4,
         init_agents: int = 10,
         base_agent_utils: float = 0.0,
         base_env_utils: float = 2.0,
-        grid_size: int = 1,
-        snap_interval: int = 20
+        grid_size: int = 2,
+        repr_multi: int = 2,
+        mortality: float = 0.01
     ) -> None:
         super().__init__()
         self.feature_interactions = feature_interactions
@@ -123,20 +125,17 @@ class World(Model):
             (init_env_features + init_agent_features)
         )
         self.grid_size = grid_size
-        self.snap_interval = snap_interval
+        self.repr_multi = repr_multi
+        self.mortality = mortality
         self.grid = MultiGrid(grid_size, grid_size, True)
         self.schedule = RandomActivation(self)
+        self.cached_payoffs = {}
         self.datacollector = DataCollector(
             model_reporters = {
                 "Pop": get_population,
                 "Total Utility": get_total_utility,
                 "Avg Utility": get_avg_utility
             },
-            agent_reporters = {
-                "Utils": lambda agent: agent.utils,
-                "Age": lambda agent: agent.age,
-                "Traits": lambda agent: len(agent.traits)
-            }
         )
         if self.feature_interactions is None:
             self.current_feature_id = 0
@@ -145,6 +144,8 @@ class World(Model):
                 self.create_feature(env = True)
             for i in range(init_agent_features):
                 self.create_feature()
+            print("Interaction Report ----------")
+            interaction_report(self)
         else:
             self.current_feature_id = len(self.feature_interactions.number_of_nodes())
         self.sites = {}
@@ -152,6 +153,8 @@ class World(Model):
             pos = (x,y)
             site = Site(model=self, pos=pos)
             self.sites[pos] = site
+        print("Environment -----------")
+        env_features_dist(self)
         for i in range(init_agents):
             num_traits = self.random.randrange(1, init_agent_features + 1)
             agent = self.create_agent(num_traits = num_traits)
@@ -159,6 +162,11 @@ class World(Model):
             x = self.random.randrange(self.grid_size)
             y = self.random.randrange(self.grid_size)
             self.grid.place_agent(agent, (x, y))
+        print("Agent Features Distribution -----------")
+        agent_features_dist(self)
+        print("Roles Distribution ------------")
+        print(role_dist(self))
+        draw_feature_interactions(self)
 
     def next_feature_id(self) -> int:
         self.current_feature_id += 1
@@ -254,23 +262,27 @@ class World(Model):
             unique_id = self.next_id(),
             model = self,
             utils = utils,
-            traits = traits
+            traits = traits,
         )
         return agent
 
     def step(self):
+        self.new = 0
+        self.cached = 0
+        self.born = 0
+        self.died = 0
         for site in self.sites.values():
             site.reset()
         self.schedule.step()
         print(
-            "Step{0}: {1} agents, {2} roles, {3} types".format(
+            "Step{0}: {1} agents, {2} roles, {3} types, {4} new and {5} cached interactions".format(
                 self.schedule.time,
                 len(self.schedule.agents),
                 len(set(occupied_roles_list(self))),
                 len(set(occupied_trait_set_list(self))),
+                self.new,
+                self.cached
             )
         )
+        print("{0} born and {1} died".format(self.born, self.died))
         self.datacollector.collect(self)
-
-
-
