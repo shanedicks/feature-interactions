@@ -8,7 +8,7 @@ from mesa.datacollection import DataCollector
 from mesa.space import MultiGrid
 from mesa.time import RandomActivation
 
-from agents import Agent, Site
+from agents import Agent, Role
 from output import *
 
 Payoff = Tuple[float, float]
@@ -34,8 +34,9 @@ class Feature:
         self,
         feature_id: int,
         env: bool,
-        num_values: int = 5
+        num_values: int = 5,
     ) -> None:
+        self.id = feature_id
         self.name = name_from_number(feature_id, lower=False)
         self.env = env
         self.values = []
@@ -56,7 +57,6 @@ class Interaction:
         model: "World",
         initiator: Feature,
         target: Feature,
-        trait_utility_random: bool = False,
         trait_payoff_mod: float = 0.25,
         payoffs: PayoffDict = None
     ) -> None:
@@ -68,7 +68,7 @@ class Interaction:
         self.anchors = self.set_anchors()
         assert trait_payoff_mod <= 1.0
         if payoffs is None:
-            self.payoffs = self.construct_payoffs(random=trait_utility_random)
+            self.payoffs = self.construct_payoffs()
         else:
             self.payoffs = payoffs
 
@@ -78,7 +78,7 @@ class Interaction:
         t_anchor = round(self.random.uniform(-anchor, anchor), 2)
         return {"i": i_anchor, "t": t_anchor}
 
-    def construct_payoffs(self, random:bool) -> PayoffDict:
+    def construct_payoffs(self) -> PayoffDict:
         payoffs = {}
         for i_value in self.initiator.values:
             payoffs[i_value] = {}
@@ -101,6 +101,43 @@ class Interaction:
         )
 
 
+class Site:
+
+    def __init__(
+        self,
+        model: "World",
+        pos: Tuple[int, int]
+    ) -> None:
+        self.model = model
+        self.random = model.random
+        self.pos = pos
+        self.pop_cost = 0
+        self.traits = {}
+        self.utils = {}
+        env_features = self.model.get_features_list(env=True)
+        num_traits = self.random.randrange(len(env_features) + 1)
+        features = self.random.sample(env_features, num_traits)
+        for feature in features:
+            self.traits[feature] = self.random.choice(feature.values)
+            self.utils[feature] = self.model.base_env_utils
+
+    def local_agents_iter(self, shuffled = True):
+        agents = self.model.grid.get_cell_list_contents(self.pos)
+        if shuffled:
+            self.random.shuffle(agents)
+        for agent in agents:
+            yield agent
+
+    def reset(self):
+        for feature in self.utils:
+            self.utils[feature] = self.model.base_env_utils
+        pop = len(self.model.grid.get_cell_list_contents(self.pos))
+        self.pop_cost = (pop / self.model.site_pop_limit)
+
+    def __repr__(self) -> str:
+        return "Site {0}".format(self.pos)
+
+
 class World(Model):
 
     def __init__(
@@ -111,9 +148,10 @@ class World(Model):
         max_feature_interactions: int = 4,
         init_agents: int = 10,
         base_agent_utils: float = 0.0,
-        base_env_utils: float = 2.0,
+        base_env_utils: float = 10.0,
+        total_pop_limit = 10000,
         grid_size: int = 2,
-        repr_multi: int = 2,
+        repr_multi: int = 1,
         mortality: float = 0.01
     ) -> None:
         super().__init__()
@@ -127,9 +165,12 @@ class World(Model):
         self.grid_size = grid_size
         self.repr_multi = repr_multi
         self.mortality = mortality
+        self.site_pop_limit = total_pop_limit / (grid_size ** 2)
         self.grid = MultiGrid(grid_size, grid_size, True)
         self.schedule = RandomActivation(self)
         self.cached_payoffs = {}
+        self.roles = {}
+        self.sites = {}
         self.datacollector = DataCollector(
             model_reporters = {
                 "Pop": get_population,
@@ -148,7 +189,6 @@ class World(Model):
             interaction_report(self)
         else:
             self.current_feature_id = len(self.feature_interactions.number_of_nodes())
-        self.sites = {}
         for _, x, y in self.grid.coord_iter():
             pos = (x,y)
             site = Site(model=self, pos=pos)
@@ -279,10 +319,11 @@ class World(Model):
                 self.schedule.time,
                 len(self.schedule.agents),
                 len(set(occupied_roles_list(self))),
-                len(set(occupied_trait_set_list(self))),
+                len(set(occupied_phenotypes_list(self))),
                 self.new,
                 self.cached
             )
         )
         print("{0} born and {1} died".format(self.born, self.died))
+        env_report(self)
         self.datacollector.collect(self)

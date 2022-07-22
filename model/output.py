@@ -27,7 +27,7 @@ def draw_feature_interactions(world):
     plt.show()
 
 def draw_role_network(world):
-    g = nx.Digraph()
+    g = nx.DiGraph()
     pos = nx.spring_layout(g)
     nodes = set(occupied_roles_list(world))
     nx.draw_networkx_nodes(g, pos, nodelist=nodes)
@@ -59,13 +59,17 @@ def env_features_dist(world):
         print(site, site.traits)
 
 def role_dist(world):
-    c = Counter([a.rolename for a in world.schedule.agents])
+    c = Counter([a.role for a in world.schedule.agents])
+    return c.most_common(len(c))
+
+def phenotype_dist(world):
+    c = Counter([a.phenotype for a in world.schedule.agents])
     return c.most_common(len(c))
 
 def env_report(world):
 	for site in world.sites.values():
 		pop = len(world.grid.get_cell_list_contents(site.pos))
-		print(site, pop, site.utils)
+		print(site, pop, site.pop_cost, site.utils)
 
 def get_feature_by_name(world, name):
     f = [f for f in world.feature_interactions.nodes if f.name is name]
@@ -96,14 +100,7 @@ def interaction_report(world, full: bool = False):
 			print(i, avg_payoff(i))
 
 def occupied_roles_list(world):
-	return list(set([frozenset(a.role) for a in world.schedule.agents]))
+	return list(set([a.role for a in world.schedule.agents]))
 
-def occupied_rolenames_list(world):
-    return list(set([a.rolename for a in world.schedule.agents]))
-
-def occupied_trait_set_list(world):
-	return [
-		frozenset({(k,v) for k,v in a.traits.items()}) 
-		for a 
-		in world.schedule.agents
-	]
+def occupied_phenotypes_list(world):
+	return [a.phenotype for a in world.schedule.agents]
