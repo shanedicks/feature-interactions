@@ -1,3 +1,4 @@
+from itertools import chain, combinations
 from typing import Dict, List, Tuple
 import random
 
@@ -8,7 +9,7 @@ from mesa.datacollection import DataCollector
 from mesa.space import MultiGrid
 from mesa.time import RandomActivation
 
-from agents import Agent, Role
+from agents import Agent, Role, Site
 from output import *
 
 Payoff = Tuple[float, float]
@@ -101,43 +102,6 @@ class Interaction:
         )
 
 
-class Site:
-
-    def __init__(
-        self,
-        model: "World",
-        pos: Tuple[int, int]
-    ) -> None:
-        self.model = model
-        self.random = model.random
-        self.pos = pos
-        self.pop_cost = 0
-        self.traits = {}
-        self.utils = {}
-        env_features = self.model.get_features_list(env=True)
-        num_traits = self.random.randrange(len(env_features) + 1)
-        features = self.random.sample(env_features, num_traits)
-        for feature in features:
-            self.traits[feature] = self.random.choice(feature.values)
-            self.utils[feature] = self.model.base_env_utils
-
-    def local_agents_iter(self, shuffled = True):
-        agents = self.model.grid.get_cell_list_contents(self.pos)
-        if shuffled:
-            self.random.shuffle(agents)
-        for agent in agents:
-            yield agent
-
-    def reset(self):
-        for feature in self.utils:
-            self.utils[feature] = self.model.base_env_utils
-        pop = len(self.model.grid.get_cell_list_contents(self.pos))
-        self.pop_cost = (pop / self.model.site_pop_limit)
-
-    def __repr__(self) -> str:
-        return "Site {0}".format(self.pos)
-
-
 class World(Model):
 
     def __init__(
@@ -146,13 +110,14 @@ class World(Model):
         init_env_features: int = 5,
         init_agent_features: int = 3,
         max_feature_interactions: int = 4,
-        init_agents: int = 10,
+        init_agents: int = 100,
         base_agent_utils: float = 0.0,
         base_env_utils: float = 10.0,
         total_pop_limit = 10000,
         grid_size: int = 2,
         repr_multi: int = 1,
-        mortality: float = 0.01
+        mortality: float = 0.01,
+        move_chance: float = 0.02
     ) -> None:
         super().__init__()
         self.feature_interactions = feature_interactions
@@ -165,18 +130,30 @@ class World(Model):
         self.grid_size = grid_size
         self.repr_multi = repr_multi
         self.mortality = mortality
+        self.move_chance = move_chance
         self.site_pop_limit = total_pop_limit / (grid_size ** 2)
         self.grid = MultiGrid(grid_size, grid_size, True)
         self.schedule = RandomActivation(self)
         self.cached_payoffs = {}
-        self.roles = {}
+        self.roles_dict = {}
         self.sites = {}
+        self.born = 0
+        self.died = 0
+        self.moved = 0
         self.datacollector = DataCollector(
             model_reporters = {
                 "Pop": get_population,
                 "Total Utility": get_total_utility,
-                "Avg Utility": get_avg_utility
+                "Avg Utility": get_avg_utility,
+                "Phenotypes": get_num_phenotypes,
+                "Roles": get_num_roles,
+                "Born": lambda x: x.born,
+                "Died": lambda x: x.died,
+                "Moved": lambda x: x.moved
             },
+            tables = {
+                "Role Dist": ['Step', 'Role', 'Pop']
+            }
         )
         if self.feature_interactions is None:
             self.current_feature_id = 0
@@ -189,6 +166,8 @@ class World(Model):
             interaction_report(self)
         else:
             self.current_feature_id = len(self.feature_interactions.number_of_nodes())
+        self.roles_network = nx.DiGraph()
+        self.roles_network.add_nodes_from(self.get_features_list(env=True))
         for _, x, y in self.grid.coord_iter():
             pos = (x,y)
             site = Site(model=self, pos=pos)
@@ -202,11 +181,17 @@ class World(Model):
             x = self.random.randrange(self.grid_size)
             y = self.random.randrange(self.grid_size)
             self.grid.place_agent(agent, (x, y))
+        for agent in self.schedule.agents:
+            agent.site = agent.get_site()
+            agent.role = agent.get_role()
         print("Agent Features Distribution -----------")
         agent_features_dist(self)
         print("Roles Distribution ------------")
         print(role_dist(self))
         draw_feature_interactions(self)
+        for site in self.sites.values():
+            print(site)
+            draw_role_network(site)
 
     def next_feature_id(self) -> int:
         self.current_feature_id += 1
@@ -214,6 +199,13 @@ class World(Model):
 
     def get_features_list(self, env: bool = False) -> List[Feature]:
         return [f for f in self.feature_interactions.nodes if f.env is env]
+
+    def role_generator(self):
+        features = self.get_features_list()
+        feature_sets = chain.from_iterable(combinations(features, n) for n in range(len(features) + 1))
+        for feature_set in feature_sets:
+            role = Role(model=self, features=frozenset(feature_set))
+            yield role
 
     def create_interaction(
         self,
@@ -233,10 +225,17 @@ class World(Model):
                 target = target,
             )
             self.feature_interactions.add_edge(
-                interaction.initiator,
-                interaction.target,
+                initiator,
+                target,
                 interaction = interaction
             )
+            affected_roles = [
+                r['role'] for r
+                in self.roles_dict.values()
+                if any(f in r['role'].features for f in [initiator, target])
+            ]
+            for role in affected_roles:
+                role.interactions = role.get_interactions()
         return
 
     def create_trait(
@@ -283,6 +282,7 @@ class World(Model):
             num_ints = self.random.randrange(1, self.max_feature_interactions)
             for i in range(num_ints):
                 self.create_interaction(feature)
+        print('New feature ', feature)
         return feature
 
     def create_agent(
@@ -311,6 +311,7 @@ class World(Model):
         self.cached = 0
         self.born = 0
         self.died = 0
+        self.moved = 0
         for site in self.sites.values():
             site.reset()
         self.schedule.step()
@@ -327,3 +328,12 @@ class World(Model):
         print("{0} born and {1} died".format(self.born, self.died))
         env_report(self)
         self.datacollector.collect(self)
+        for role, pop in role_dist(self):
+            new_row = {
+                "Step": self.schedule.time,
+                "Role": role,
+                "Pop": pop
+            }
+            self.datacollector.add_table_row('Role Dist', new_row)
+        for site in self.sites.values():
+            site.prune_roles()

@@ -4,6 +4,7 @@ from statistics import mean
 import matplotlib.pyplot as plt
 import networkx as nx
 
+# Model Reporters
 def get_population(world):
     return len(world.schedule.agents)
 
@@ -16,6 +17,14 @@ def get_avg_utility(world):
     avg = total / population if population > 0 else 0
     return avg
 
+def get_num_roles(world):
+    return len(occupied_roles_list(world))
+
+def get_num_phenotypes(world):
+    return len(occupied_phenotypes_list(world))
+
+
+# Graphics
 def draw_feature_interactions(world):
     g = world.feature_interactions
     pos = nx.circular_layout(g)
@@ -26,11 +35,17 @@ def draw_feature_interactions(world):
     nx.draw_networkx_labels(g, pos, labels)
     plt.show()
 
-def draw_role_network(world):
-    g = nx.DiGraph()
-    pos = nx.spring_layout(g)
-    nodes = set(occupied_roles_list(world))
-    nx.draw_networkx_nodes(g, pos, nodelist=nodes)
+def draw_role_network(site):
+    g = site.roles_network
+    pos = nx.circular_layout(g)
+    labels = {n: n.__repr__() for n in pos.keys()}
+    env_nodes = [f for f in site.traits.keys()]
+    role_nodes = [r['role'] for r in site.model.roles_dict.values() if site in r['sites']]
+    nx.draw_networkx_nodes(g, pos, nodelist=env_nodes, node_color="tab:green")
+    nx.draw_networkx_nodes(g, pos, nodelist=role_nodes, node_color="tab:blue")
+    nx.draw_networkx_edges(g, pos)
+    nx.draw_networkx_labels(g, pos, labels)
+    plt.show()
 
 def draw_utility_hist(world):
     agent_fitness = [a.utils for a in world.schedule.agents]
@@ -47,6 +62,7 @@ def draw_age_hist(world):
     plt.hist(ages)
     plt.show()
 
+# Descriptives
 def agent_features_dist(world):
     for feature in world.get_features_list():
         agents = [a for a in world.schedule.agents if feature in a.traits]
@@ -103,4 +119,4 @@ def occupied_roles_list(world):
 	return list(set([a.role for a in world.schedule.agents]))
 
 def occupied_phenotypes_list(world):
-	return [a.phenotype for a in world.schedule.agents]
+	return list(set([a.phenotype for a in world.schedule.agents]))
