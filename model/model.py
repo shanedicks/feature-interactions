@@ -201,6 +201,7 @@ class World(Model):
         self.schedule = RandomActivation(self)
         self.cached_payoffs = {}
         self.roles_dict = {}
+        self.site_roles_dict = {}
         self.sites = {}
         self.born = 0
         self.died = 0
@@ -212,13 +213,15 @@ class World(Model):
                 "Mean Utility": get_mean_utility,
                 "Med Utility": get_median_utility,
                 "Phenotypes": get_num_phenotypes,
+                "Features": get_num_agent_features,
                 "Roles": get_num_roles,
-                "Born": lambda x: x.born,
-                "Died": lambda x: x.died,
-                "Moved": lambda x: x.moved
+                "Born": "born",
+                "Died": "died",
+                "Moved": "moved"
             },
             tables = {
-                "Role Dist": ['Step', 'Role', 'Pop']
+                "Occupied Roles": ['Step', 'Site', 'Role', 'Pop'],
+                "Other Roles": ['Step', 'Site', 'Viable', 'Adjacent', 'Occupiable']
             }
         )
         if self.feature_interactions is None:
@@ -236,6 +239,7 @@ class World(Model):
             pos = (x,y)
             site = Site(model=self, pos=pos)
             self.sites[pos] = site
+            self.site_roles_dict[pos] = {}
         t_list = list(range(1, init_agent_features+1))
         for i in range(init_agents):
             num_traits = self.random.choices(t_list, t_list[::-1])[0]
@@ -267,14 +271,56 @@ class World(Model):
         for feature_set in feature_sets:
             yield feature_set
 
+    def evaluate_rolesets(self):
+        dc = self.datacollector
+        srd = self.site_roles_dict
+        for site in self.sites.values():
+            site.pop_cost = site.get_pop_cost()
+            site.fud = site.get_feature_utility_dict()
+            sd = srd[site.pos]
+            sd['occupied'] = get_occupied(site)
+            sd['possible'] = get_num_possible(self)
+            sd['viable'] = 0
+            sd['adjacent'] = set()
+            sd['occupiable'] = set()
+        for role in self.role_generator():
+            for site in self.sites.values():
+                sd = srd[site.pos]
+                v = check_viable(site, role)
+                a = check_adjacent(site, role)
+                o = a and v
+                if o:
+                    sd['viable'] += 1
+                    sd['adjacent'].add(role)
+                    sd['occupiable'].add(role)
+                elif v:
+                    sd['viable'] += 1
+                elif a:
+                    sd['adjacent'].add(role)
+        for site in self.sites.values():
+            keys = ['Step', 'Site', 'Viable', 'Adjacent', 'Occupiable']
+            site.update_role_network()
+            sd = srd[site.pos]
+            values = [
+                self.schedule.time,
+                site.pos, 
+                sd['viable'],
+                len(sd['adjacent']),
+                len(sd['occupiable']),
+            ]
+            dc.add_table_row('Other Roles', {k:v for k,v in zip(keys, values)})
+            keys = ['Step', 'Site', 'Role', 'Pop']
+            for role, pop in sd['occupied'].items():
+                values = [self.schedule.time, site.pos, role.rolename, pop]
+                dc.add_table_row('Occupied Roles', {k:v for k,v in zip(keys, values)})
+
     def create_interaction(
         self,
         initiator: Feature,
     ) -> None:
         extant_targets = list(self.feature_interactions.neighbors(initiator))
         target_choices = [
-            x for x
-            in self.feature_interactions.nodes
+            x for x in self.feature_interactions.nodes
             if x not in extant_targets
         ]
         if len(target_choices) > 0:
@@ -285,13 +331,10 @@ class World(Model):
                 target = target,
             )
             self.feature_interactions.add_edge(
-                initiator,
-                target,
-                interaction = interaction
+                initiator, target, interaction = interaction
             )
             affected_roles = [
-                role for role
-                in self.roles_dict.values()
+                role for role in self.roles_dict.values()
                 if any(f in role.features for f in [initiator, target])
             ]
             for role in affected_roles:
@@ -387,16 +430,7 @@ class World(Model):
             )
         )
         print("{0} born and {1} died".format(self.born, self.died))
+        self.evaluate_rolesets()
         env_report(self)
         self.datacollector.collect(self)
         print(role_dist(self))
-        for role, pop in role_dist(self):
-            new_row = {
-                "Step": self.schedule.time,
-                "Role": role,
-                "Pop": pop
-            }
-            self.datacollector.add_table_row('Role Dist', new_row)
-        for site in self.sites.values():
-            site.evaluate_local_rolesets()
-            site.update_role_network()
