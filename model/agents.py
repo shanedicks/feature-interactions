@@ -33,30 +33,6 @@ class Role:
         ]
         return interactions
 
-    def add_to_role_network(self, site):
-        roles_network = site.roles_network
-        roles_network.add_node(self)
-        env_targets = [x for x in self.interactions['initiator'] if x.target.env == True and x.target in site.traits.keys()]
-        roles_network.add_edges_from([(self, x.target) for x in env_targets])
-        targeted_by_roles = [
-            r['role'] for r
-            in self.model.roles_dict.values()
-            if any(
-                f in r['role'].features for f in [x.initiator for x in self.interactions['target']]
-            )
-            and site in r['sites']
-        ]
-        roles_network.add_edges_from([(initiator, self) for initiator in targeted_by_roles])
-        targeting_roles = [
-            r['role'] for r
-            in self.model.roles_dict.values()
-            if any(
-                f in r['role'].features for f in [x.target for x in self.interactions['initiator']]
-            )
-            and site in r['sites']
-        ]
-        roles_network.add_edges_from([(self, target) for target in targeting_roles])
-
     def __repr__(self) -> str:
         return self.rolename
 
@@ -72,8 +48,16 @@ class Site:
         self.random = model.random
         self.pos = pos
         self.pop_cost = 0
+        self.pop = 0
         self.traits = {}
         self.utils = {}
+        self.local_roles = {
+            'possible': 0,
+            'viable': set(),
+            'adjacent': set(),
+            'occupiable': set(),
+            'occupied': {}
+        }
         self.roles_network = nx.DiGraph()
         env_features = self.model.get_features_list(env=True)
         num_traits = self.random.randrange(len(env_features) + 1)
@@ -83,27 +67,108 @@ class Site:
             self.utils[feature] = self.model.base_env_utils
         self.roles_network.add_nodes_from(features)
 
-    def local_agents_iter(self, shuffled = True):
-        agents = self.model.grid.get_cell_list_contents(self.pos)
-        if shuffled:
-            self.random.shuffle(agents)
-        for agent in agents:
+    def local_agents_iter(self):
+        for agent in self.model.grid.get_cell_list_contents(self.pos):
             yield agent
 
-    def prune_roles(self):
-        role_nodes = [n for n in self.roles_network.nodes if type(n) is Role]
-        roles = set([a.role for a in self.local_agents_iter()])
-        to_remove = [n for n in role_nodes if n not in roles]
-        for node in to_remove:
-            self.roles_network.remove_node(node)
-            print("Removed {0} from {1}".format(node, self))
-            self.model.roles_dict[frozenset(node.features)]['sites'].remove(self)
+    def shuffled_sample(self, num):
+        if self.pop < num:
+            agents = list(self.local_agents_iter())
+            self.random.shuffle(agents)
+        else:
+            agents = self.random.sample(list(self.local_agents_iter()), num)
+        return agents
+
+    def get_local_features_dict(self):
+        lfd = {}
+        for f in self.model.get_features_list():
+            c = Counter([a.traits[f] for a in self.local_agents_iter() if f in a.traits])
+            lfd[f] = {}
+            lfd[f]['traits'] = dict(c)
+            total = sum(lfd[f]['traits'].values())
+            lfd[f]['total'] = total
+            lfd[f]['dist'] = {i: c/total for i, c in dict(c).items()}
+        return lfd
+
+    def get_feature_utility_dict(self):
+        fud = {}
+        pop = len(self.model.grid.get_cell_list_contents(self.pos))
+        for f in self.model.get_features_list():
+            scores = f.agent_feature_eu_dict(self)
+            fud[f] = scores
+        return fud
+
+    def check_viable(self, features):
+        eu = sum([max(self.fud[f].values()) for f in features])
+        if eu - self.pop_cost < 0:
+            return False
+        else:
+            return True
+
+    def check_adjacent(self, features):
+        occupied_set = set(self.get_occupied().keys())
+        for occupied in occupied_set:
+            if len(occupied.features ^ set(features)) <= 1:
+                return True
+        else:
+            return False
+
+    def get_num_possible(self):
+        return 2 ** len(self.model.get_features_list())
+
+    def get_viable(self):
+        return len(set(filter(self.check_viable, self.model.role_generator())))
+
+    def get_adjacent(self):
+        return set(filter(self.check_adjacent, self.model.role_generator()))
+
+    def get_occupied(self):
+        c = Counter([a.role for a in self.local_agents_iter()])
+        return dict(c)
+
+    def evaluate_local_rolesets(self):
+        self.pop_cost = self.get_pop_cost()
+        self.fud = self.get_feature_utility_dict()
+        lr = self.local_roles
+        lr['occupied'] = self.get_occupied()
+        lr['possible'] = self.get_num_possible()
+        lr['viable'] = self.get_viable()
+        lr['adjacent'] = self.get_adjacent()
+        lr['occupiable'] = set(filter(self.check_viable, lr['adjacent']))
+
+    def update_role_network(self):
+        rn = self.roles_network
+        role_nodes = [n for n in rn.nodes() if type(n) is Role]
+        occ_roles = self.local_roles['occupied']
+        nodes_to_remove = [n for n in role_nodes if n not in occ_roles]
+        rn.remove_nodes_from(nodes_to_remove)
+        nodes_to_add = [n for n in occ_roles if n not in role_nodes]
+        rn.add_nodes_from(nodes_to_add)
+        role_nodes.extend(nodes_to_add)
+        for role in nodes_to_add:
+            env_targets = [
+                i.target for i 
+                in role.interactions['initiator'] 
+                if i.target.env == True and i.target in self.traits.keys()
+            ]
+            rn.add_edges_from([(role, target) for target in env_targets])
+            role_targets = [
+                target for target
+                in role_nodes
+                if any(
+                    f in target.features 
+                    for f in [i.target for i in role.interactions['initiator']]
+                )
+            ]
+            rn.add_edges_from([(role, target) for target in role_targets])
+
+    def get_pop_cost(self):
+        return (self.pop / self.model.site_pop_limit) ** self.model.pop_cost_exp
 
     def reset(self):
         for feature in self.utils:
             self.utils[feature] = self.model.base_env_utils
-        pop = len(self.model.grid.get_cell_list_contents(self.pos))
-        self.pop_cost = (pop / self.model.site_pop_limit)
+        self.pop_cost = self.get_pop_cost()
 
     def __repr__(self) -> str:
         return "Site {0}".format(self.pos)
@@ -116,20 +181,20 @@ class Agent(Agent):
         model: "World",
         traits: Dict["Feature", str],
         utils: float,
-        trait_mutation_chance: float = 0.01,
-        trait_creation_chance: float = 0.01,
-        feature_mutation_chance: float = 0.001,
+        trait_mutate_chance: float = 0.02,
+        trait_create_chance: float = 0.01,
+        feature_mutate_chance: float = 0.001,
+        feature_create_chance: float = 0.005,
         feature_gain_chance: float = 0.5,
-        feature_creation_chance: float = 0.05
     ) -> None:
         super().__init__(unique_id, model)
         self.utils = utils
         self.traits = traits
-        self.trait_mutation_chance = trait_mutation_chance
-        self.trait_creation_chance = trait_creation_chance
-        self.feature_mutation_chance = feature_mutation_chance
+        self.trait_mutate_chance = trait_mutate_chance
+        self.trait_create_chance = trait_create_chance
+        self.feature_mutate_chance = feature_mutate_chance
         self.feature_gain_chance = feature_gain_chance
-        self.feature_creation_chance = feature_creation_chance
+        self.feature_create_chance = feature_create_chance
         self.age = 0
         self.site = None
         self.role = None
@@ -140,6 +205,7 @@ class Agent(Agent):
         return "".join(traits)
 
     def get_site(self):
+        self.model.sites[self.pos].pop += 1
         return self.model.sites[self.pos] 
 
     def get_role(self) -> Role:
@@ -149,16 +215,8 @@ class Agent(Agent):
                 model = self.model,
                 features = features
             )
-            self.model.roles_dict[features] = {
-                "role": new_role,
-                'sites': []
-            }
-        role = self.model.roles_dict[features]['role']
-        if self.site not in self.model.roles_dict[features]['sites']:
-            self.model.roles_dict[features]['sites'].append(self.site)
-        if role not in self.site.roles_network.nodes:
-            role.add_to_role_network(site=self.site)
-            print("{0} added to {1}".format(role, self.site))
+            self.model.roles_dict[features] = new_role
+        role = self.model.roles_dict[features]
         return role
 
     def get_agent_target(self) -> Optional[Agent]:
@@ -174,8 +232,7 @@ class Agent(Agent):
                 return True
             else:
                 return False
-        shuffled = self.site.local_agents_iter()
-        return next(filter(targetable, shuffled), None)
+        return next(filter(targetable, self.site.shuffled_sample(100)), None)
 
     def do_env_interactions(self) -> None:
         interactions = [
@@ -256,31 +313,31 @@ class Agent(Agent):
     def reproduce(self) -> None:
         child_traits = self.traits.copy()
         for feature in child_traits:
-            if self.random.random() <= self.trait_mutation_chance:
+            if self.random.random() <= self.trait_mutate_chance:
                 new_traits = [
                     x for x
                     in feature.values
                     if x != child_traits[feature]
                 ]
-                if self.random.random() <= self.trait_creation_chance:
+                if self.random.random() <= self.trait_create_chance:
                     child_traits[feature] = self.model.create_trait(feature)
                 else:
                     child_traits[feature] = self.random.choice(new_traits)
-        if self.random.random() <= self.feature_mutation_chance:
-            if self.random.random() < self.feature_gain_chance:
+        if self.random.random() <= self.feature_mutate_chance:
+            if self.random.random() <= self.feature_create_chance:
+                feature = self.model.create_feature()
+                child_traits[feature] = self.random.choice(feature.values)
+            else: 
                 features = [
                     f for f
                     in self.model.feature_interactions.nodes
                     if f.env is False and f not in child_traits
                 ]
-                if self.random.random() <= self.feature_creation_chance:
-                    feature = self.model.create_feature()
-                else:
+                if self.random.random() < self.feature_gain_chance and len(features) > 0:
                     feature = self.random.choice(features)
-                child_traits[feature] = self.random.choice(feature.values)
-            else:
-                key = self.random.choice(list(child_traits.keys()))
-                del child_traits[key]
+                else:
+                    key = self.random.choice(list(child_traits.keys()))
+                    del child_traits[key]
         if len(child_traits) > 0:
             new_agent = Agent(
                 unique_id = self.model.next_id(),
@@ -295,6 +352,7 @@ class Agent(Agent):
             self.model.born += 1
 
     def move(self) -> None:
+        self.site.pop -= 1
         neighborhood = self.model.grid.get_neighborhood(
                 self.pos,
                 moore=True,
@@ -307,6 +365,7 @@ class Agent(Agent):
         self.model.moved += 1
 
     def die(self) -> None:
+        self.site.pop -= 1
         self.model.schedule.remove(self)
         self.model.grid.remove_agent(self)
         self.model.died += 1

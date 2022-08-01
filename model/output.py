@@ -1,21 +1,28 @@
 from collections import Counter
 from typing import Dict, List, Tuple
-from statistics import mean
+from statistics import mean, median
 import matplotlib.pyplot as plt
 import networkx as nx
 
+# Control
+def step_forward(world, num_steps):
+    for i in range(num_steps):
+        world.step()
+
 # Model Reporters
 def get_population(world):
-    return len(world.schedule.agents)
+    return world.schedule.get_agent_count()
 
 def get_total_utility(world):
     return sum([a.utils for a in world.schedule.agents])
 
-def get_avg_utility(world):
-    total = get_total_utility(world)
-    population = get_population(world)
-    avg = total / population if population > 0 else 0
+def get_mean_utility(world):
+    avg = mean([a.utils for a in world.schedule.agents]) if world.schedule.get_agent_count() > 0 else 0
     return avg
+
+def get_median_utility(world):
+    med = median([a.utils for a in world.schedule.agents]) if world.schedule.get_agent_count() > 0 else 0
+    return med
 
 def get_num_roles(world):
     return len(occupied_roles_list(world))
@@ -40,7 +47,7 @@ def draw_role_network(site):
     pos = nx.circular_layout(g)
     labels = {n: n.__repr__() for n in pos.keys()}
     env_nodes = [f for f in site.traits.keys()]
-    role_nodes = [r['role'] for r in site.model.roles_dict.values() if site in r['sites']]
+    role_nodes = [n for n in g.nodes() if n not in env_nodes]
     nx.draw_networkx_nodes(g, pos, nodelist=env_nodes, node_color="tab:green")
     nx.draw_networkx_nodes(g, pos, nodelist=role_nodes, node_color="tab:blue")
     nx.draw_networkx_edges(g, pos)
@@ -83,9 +90,10 @@ def phenotype_dist(world):
     return c.most_common(len(c))
 
 def env_report(world):
-	for site in world.sites.values():
-		pop = len(world.grid.get_cell_list_contents(site.pos))
-		print(site, pop, site.pop_cost, site.utils)
+    for site in world.sites.values():
+        pop = len(world.grid.get_cell_list_contents(site.pos))
+        utils = {k: round(v, 2) for k, v in site.utils.items()}
+        print(site, pop, round(site.pop_cost,2), utils)
 
 def get_feature_by_name(world, name):
     f = [f for f in world.feature_interactions.nodes if f.name is name]
@@ -103,20 +111,20 @@ def print_matrix(interaction):
         print([p for p in item.values()])
 
 def interaction_report(world, full: bool = False):
-	interactions = [
-		x[2]
-		for x
-		in world.feature_interactions.edges(data='interaction')
-	]
-	if full:
-		for i in interactions:
-			print_matrix(i)
-	else:
-		for i in interactions:
-			print(i, avg_payoff(i))
+    interactions = [
+        x[2]
+        for x
+        in world.feature_interactions.edges(data='interaction')
+    ]
+    if full:
+        for i in interactions:
+            print_matrix(i)
+    else:
+        for i in interactions:
+            print(i, avg_payoff(i))
 
 def occupied_roles_list(world):
-	return list(set([a.role for a in world.schedule.agents]))
+    return list(set([a.role for a in world.schedule.agents]))
 
 def occupied_phenotypes_list(world):
-	return list(set([a.phenotype for a in world.schedule.agents]))
+    return list(set([a.phenotype for a in world.schedule.agents]))
