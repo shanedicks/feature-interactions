@@ -1,81 +1,70 @@
-from typing import Dict, List, Tuple, Optional, Set, Union, FrozenSet
+from typing import Dict, List, Tuple, Set, Union, Iterator
 from random import Random
 from mesa import Agent
+from features import Role
 from output import *
-
-class Role:
-    def __init__(
-        self,
-        model: "World",
-        features: FrozenSet["Feature"],
-    ):
-        self.model = model
-        self.features = features
-        self.rolename = ".".join(sorted([f.name for f in features]))
-        self.interactions = self.get_interactions()
-
-    def get_interactions(self):
-        features = [f for f in self.features]
-        interactions = {}
-        interactions['initiator'] = [
-            x[2] for x
-            in self.model.feature_interactions.edges(
-                nbunch=features,
-                data='interaction'
-            )
-        ]
-        interactions['target'] = [
-            x[2] for x
-            in self.model.feature_interactions.in_edges(
-                nbunch=features,
-                data='interaction'
-            )
-        ]
-        return interactions
-
-    def __repr__(self) -> str:
-        return self.rolename
-
 
 class Site:
 
     def __init__(
         self,
         model: "World",
-        pos: Tuple[int, int]
+        pos: Tuple[int, int],
+        traits: Dict["Feature", str] = None
     ) -> None:
         self.model = model
         self.random = model.random
         self.pos = pos
         self.pop_cost = 0
-        self.pop = 0
-        self.traits = {}
+        self.born = 0
+        self.died = 0
+        self.moved_in = 0
+        self.moved_out = 0
         self.utils = {}
+        self.fud = {}
         self.roles_network = nx.DiGraph()
-        env_features = self.model.get_features_list(env=True)
-        num_traits = self.random.randrange(len(env_features) + 1)
-        features = self.random.sample(env_features, num_traits)
-        for feature in features:
-            self.traits[feature] = self.random.choice(feature.values)
-            self.utils[feature] = self.model.base_env_utils
-        self.roles_network.add_nodes_from(features)
+        if traits is None:
+            self.traits = {}
+            env_features = self.model.get_features_list(env=True)
+            num_traits = self.random.randrange(len(env_features) + 1)
+            features = self.random.sample(env_features, num_traits)
+            for feature in features:
+                self.traits[feature] = self.random.choice(feature.values)
+                self.utils[feature] = self.model.base_env_utils
+            self.roles_network.add_nodes_from(features)
+        else:
+            self.traits = traits
 
-    def local_agents_iter(self):
-        for agent in self.model.grid.get_cell_list_contents(self.pos):
-            yield agent
+    def agents(self):
+        return self.model.grid.get_cell_list_contents(self.pos)
+
+    def get_pop(self):
+        return len(self.agents())
+
+    def get_pop_cost(self):
+        return (self.get_pop() / self.model.site_pop_limit) ** self.model.pop_cost_exp
+
+    def reset(self):
+        self.born = 0
+        self.died = 0
+        self.moved_in = 0
+        self.moved_out = 0
+        for feature in self.utils:
+            self.utils[feature] = self.model.base_env_utils
+        self.pop_cost = self.get_pop_cost()
 
     def shuffled_sample(self, num: int):
-        if self.pop < num:
-            agents = list(self.local_agents_iter())
+        if self.get_pop() < num:
+            agents = self.agents()
             self.random.shuffle(agents)
         else:
-            agents = self.random.sample(list(self.local_agents_iter()), num)
+            agents = self.random.sample(self.agents(), num)
         return agents
 
     def get_local_features_dict(self):
         lfd = {}
         for f in self.model.get_features_list():
-            c = Counter([a.traits[f] for a in self.local_agents_iter() if f in a.traits])
+            c = Counter([a.traits[f] for a in self.agents() if f in a.traits])
             lfd[f] = {}
             lfd[f]['traits'] = dict(c)
             total = sum(lfd[f]['traits'].values())
@@ -83,11 +72,57 @@ class Site:
             lfd[f]['dist'] = {i: c/total for i, c in dict(c).items()}
         return lfd
 
+    def env_feature_weight(self, feature):
+        # Get the chance of initiating an interaction against Feature for an agent at a given site
+        lfd = self.get_local_features_dict()
+        lt = self.traits[feature]
+        edges = feature.in_edges()
+        pop = sum([
+            lfd[f]['total'] for f in lfd.keys()
+            if f in [e.initiator for e in edges]
+        ])
+        avg_impact = 0
+        for edge in edges:
+            weight = lfd[edge.initiator]['total'] / pop if pop > 0 else 0
+            dist = lfd[edge.initiator]['dist']
+            avg_impact += weight * sum([edge.payoffs[i][lt][1]*dist[i] for i in dist])
+        if avg_impact >= 0:
+            return 1
+        else:
+            num_ints = self.utils[feature]/-avg_impact
+            return min([num_ints/pop, 1])
+
+    def agent_feature_eu_dict(self, feature):
+        # Get the expected utility for each trait of Feature for an Agent at a given site
+        lfd = self.get_local_features_dict()
+        pop = len(self.agents())
+        in_edges = feature.in_edges()
+        out_edges = feature.out_edges()
+        scores = {}
+        for v in feature.values:
+            eu = 0
+            for edge in in_edges:
+                weight = lfd[edge.initiator]['total'] / pop if pop > 0 else 0
+                dist = lfd[edge.initiator]['dist']
+                eu += weight * sum([edge.payoffs[i][v][1]*dist[i] for i in dist])
+            for edge in out_edges:
+                if edge.target in self.traits.keys():
+                    weight = self.env_feature_weight(edge.target)
+                    eu += weight * edge.payoffs[v][self.traits[edge.target]][0]
+                elif edge.target.env:
+                    continue
+                else:
+                    weight = lfd[edge.target]['total'] / pop if pop > 0 else 0
+                    dist = lfd[edge.target]['dist']
+                    eu += weight * sum([edge.payoffs[v][i][0]*dist[i] for i in dist])
+            scores[v] = eu
+        return scores
+
     def get_feature_utility_dict(self):
         fud = {}
         pop = len(self.model.grid.get_cell_list_contents(self.pos))
         for f in self.model.get_features_list():
-            scores = f.agent_feature_eu_dict(self)
+            scores = self.agent_feature_eu_dict(f)
             fud[f] = scores
         return fud
 
@@ -116,14 +151,6 @@ class Site:
             ]
             rn.add_edges_from([(role, target) for target in role_targets])
 
-    def get_pop_cost(self):
-        return (self.pop / self.model.site_pop_limit) ** self.model.pop_cost_exp
-
-    def reset(self):
-        for feature in self.utils:
-            self.utils[feature] = self.model.base_env_utils
-        self.pop_cost = self.get_pop_cost()
-
     def __repr__(self) -> str:
         return "Site {0}".format(self.pos)
 
@@ -135,23 +162,15 @@ class Agent(Agent):
         model: "World",
         traits: Dict["Feature", str],
         utils: float,
-        trait_mutate_chance: float = 0.02,
-        trait_create_chance: float = 0.01,
-        feature_mutate_chance: float = 0.001,
-        feature_create_chance: float = 0.005,
-        feature_gain_chance: float = 0.5,
+        shadow: bool = False
     ) -> None:
         super().__init__(unique_id, model)
+        self.shadow = shadow
         self.utils = utils
         self.traits = traits
-        self.trait_mutate_chance = trait_mutate_chance
-        self.trait_create_chance = trait_create_chance
-        self.feature_mutate_chance = feature_mutate_chance
-        self.feature_gain_chance = feature_gain_chance
-        self.feature_create_chance = feature_create_chance
         self.age = 0
         self.site = None
-        self.role = None
+        self.role = self.get_role()
 
     @property
     def phenotype(self) -> str:
@@ -159,26 +178,36 @@ class Agent(Agent):
         return "".join(traits)
 
     def get_site(self):
-        self.model.sites[self.pos].pop += 1
+        try:
+            pd = self.role.phenotypes[self.pos]
+        except KeyError:
+            self.role.phenotypes[self.pos] = {}
+            pd = self.role.phenotypes[self.pos]
+        if self.phenotype not in pd:
+            pd[self.phenotype] = 0
+        pd[self.phenotype] += 1
         return self.model.sites[self.pos] 
 
     def get_role(self) -> Role:
         features = frozenset([f for f in self.traits.keys()])
-        if features not in self.model.roles_dict:
+        try:
+            role = self.model.roles_dict[features]
+        except KeyError:
             new_role = Role(
                 model = self.model,
                 features = features
             )
             self.model.roles_dict[features] = new_role
-        role = self.model.roles_dict[features]
+            role = self.model.roles_dict[features]
         return role
 
-    def get_agent_target(self) -> Optional[Agent]:
-        target_features = [
-            x.target for x
-            in self.role.interactions['initiator']
-            if x.target.env == False
-        ]
+    def get_shadow_agent(self) -> Agent:
+        agents = self.model.shadow.sites[self.pos].agents()
+        return self.random.choice(agents)
+
+    def get_agent_target(self) -> Union[Agent, None]:
+        initiating = self.role.interactions['initiator']
+        target_features = [x.target for x in initiating if x.target.env == False]
         def targetable(target):
             if target.utils >= 0 \
             and any(f in target.traits for f in target_features) \
@@ -235,9 +264,10 @@ class Agent(Agent):
     def interact(self) -> None:
         self.do_env_interactions()
         agent = self.get_agent_target() if self.utils >= 0 else None
+        cache = self.model.cached_payoffs
         if agent is not None:
             try:
-                payoffs = self.model.cached_payoffs[self.phenotype][agent.phenotype]
+                payoffs = cache[self.phenotype][agent.phenotype]
                 self.model.cached += 1
                 self.utils += payoffs[0]
                 agent.utils += payoffs[1]
@@ -255,74 +285,83 @@ class Agent(Agent):
                 agent.utils += agent_payoff
                 payoffs = (self_payoff, agent_payoff)
                 self.model.new += 1
-                if self.phenotype not in self.model.cached_payoffs:
-                    self.model.cached_payoffs[self.phenotype] = {}
-                if agent.phenotype not in self.model.cached_payoffs:
-                    self.model.cached_payoffs[agent.phenotype] = {}
-                self.model.cached_payoffs[self.phenotype][agent.phenotype] = payoffs
-                self.model.cached_payoffs[agent.phenotype][self.phenotype] = tuple(reversed(payoffs))
+                if self.phenotype not in cache:
+                    cache[self.phenotype] = {}
+                if agent.phenotype not in cache:
+                    cache[agent.phenotype] = {}
+                cache[self.phenotype][agent.phenotype] = payoffs
+                cache[agent.phenotype][self.phenotype] = tuple(reversed(payoffs))
                 if agent.utils < 0:
                     agent.die()
 
     def reproduce(self) -> None:
         child_traits = self.traits.copy()
         for feature in child_traits:
-            if self.random.random() <= self.trait_mutate_chance:
+            if self.random.random() <= self.model.trait_mutate_chance:
                 new_traits = [
-                    x for x
-                    in feature.values
-                    if x != child_traits[feature]
+                    x for x in feature.values if x != child_traits[feature]
                 ]
-                if self.random.random() <= self.trait_create_chance:
-                    child_traits[feature] = self.model.create_trait(feature)
+                if self.random.random() <= self.model.trait_create_chance \
+                and not self.shadow:
+                    child_traits[feature] = feature.create_trait()
                 else:
                     child_traits[feature] = self.random.choice(new_traits)
-        if self.random.random() <= self.feature_mutate_chance:
-            if self.random.random() <= self.feature_create_chance:
+        if self.random.random() <= self.model.feature_mutate_chance:
+            if self.random.random() <= self.model.feature_create_chance \
+            and not self.shadow:
                 feature = self.model.create_feature()
                 child_traits[feature] = self.random.choice(feature.values)
             else: 
                 features = [
-                    f for f
-                    in self.model.feature_interactions.nodes
+                    f for f in self.model.feature_interactions.nodes
                     if f.env is False and f not in child_traits
                 ]
-                if self.random.random() < self.feature_gain_chance and len(features) > 0:
+                if self.random.random() <= self.model.feature_gain_chance \
+                and len(features) > 0:
                     feature = self.random.choice(features)
                 else:
                     key = self.random.choice(list(child_traits.keys()))
                     del child_traits[key]
-        if len(child_traits) > 0:
+        if len(child_traits) > 0 or self.shadow:
             new_agent = Agent(
                 unique_id = self.model.next_id(),
                 model = self.model,
                 utils = self.model.base_agent_utils,
                 traits = child_traits,
+                shadow = self.shadow
             )
-            self.model.schedule.add(new_agent)
+            if not self.shadow:
+                self.model.schedule.add(new_agent)
             self.model.grid.place_agent(new_agent, self.pos)
             new_agent.site = new_agent.get_site()
-            new_agent.role = new_agent.get_role()
-            self.model.born += 1
+            self.site.born += 1
 
     def move(self) -> None:
-        self.site.pop -= 1
+        self.site.moved_out += 1
+        self.role.phenotypes[self.pos][self.phenotype] -= 1
         neighborhood = self.model.grid.get_neighborhood(
                 self.pos,
                 moore=True,
                 include_center=False
             )
         new_position = self.random.choice(neighborhood)
+        if not self.shadow:
+            sa = self.get_shadow_agent()
+            sa.site.moved_out += 1
+            sa.role.phenotypes[sa.pos][sa.phenotype] -= 1
+            sa.model.grid.move_agent(sa, new_position)
+            sa.site = sa.get_site()
+            sa.site.moved_in += 1
         self.model.grid.move_agent(self, new_position)
         self.site = self.get_site()
-        self.get_role()
-        self.model.moved += 1
+        self.site.moved_in += 1
 
     def die(self) -> None:
-        self.site.pop -= 1
-        self.model.schedule.remove(self)
+        if not self.shadow:
+            self.model.schedule.remove(self)
+        self.role.phenotypes[self.pos][self.phenotype] -= 1
         self.model.grid.remove_agent(self)
-        self.model.died += 1
+        self.site.died += 1
 
     def step(self):
         self.start = self.utils
@@ -336,8 +375,8 @@ class Agent(Agent):
             self.age += 1
             if self.utils > len(self.traits) * self.model.repr_multi:
                 self.reproduce()
-            if self.start == self.utils - pop_cost or\
-               self.random.random() < self.model.move_chance:
+            if self.start == self.utils - pop_cost \
+            or self.random.random() < self.model.move_chance:
                 self.move()
 
     def __repr__(self) -> str:

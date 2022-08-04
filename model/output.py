@@ -1,4 +1,5 @@
 from collections import Counter
+from itertools import chain, combinations
 from typing import Dict, List, Tuple
 from statistics import mean, median
 import matplotlib.pyplot as plt
@@ -33,6 +34,15 @@ def get_num_roles(world: "World"):
 def get_num_phenotypes(world: "World"):
     return len(occupied_phenotypes_list(world))
 
+def get_total_born(world):
+    return sum([site.born for site in world.sites.values()])
+
+def get_total_died(world):
+    return sum([site.died for site in world.sites.values()])
+
+def get_total_moved(world):
+    return sum([site.moved_in for site in world.sites.values()])
+
 # Role Evaluation
 def check_viable(site: "Site", features: Tuple["Feature"]):
     eu = sum([max(site.fud[f].values()) for f in features])
@@ -42,8 +52,9 @@ def check_viable(site: "Site", features: Tuple["Feature"]):
         return True
 
 def check_adjacent(site: "Site", features: Tuple["Feature"]):
-    occupied_set = get_occupied(site).keys()
-    for role in occupied_set:
+    sd = site.model.site_roles_dict[site.pos]
+    occupied = sd['occupied'].keys()
+    for role in occupied:
         if len(set(role.features) ^ set(features)) <= 1:
             return True
     else:
@@ -53,9 +64,59 @@ def get_num_possible(world: "World") -> int:
     return 2 ** len(world.get_features_list())
 
 def get_occupied(site):
-    c = Counter([a.role for a in site.local_agents_iter()])
-    return dict(c)
+    rd = site.model.roles_dict.values()
+    d = {r: sum(r.phenotypes[site.pos].values()) for r in rd}
+#    c = Counter([a.role for a in site.agents()])
+    return d
 
+def role_generator(world):
+    f_list = world.get_features_list()
+    feature_sets = chain.from_iterable(combinations(f_list, n) for n in range(len(f_list) + 1))
+    for feature_set in feature_sets:
+        yield feature_set
+
+def evaluate_rolesets(world):
+    dc = world.datacollector
+    srd = world.site_roles_dict
+    for site in world.sites.values():
+        site.pop_cost = site.get_pop_cost()
+        site.fud = site.get_feature_utility_dict()
+        sd = srd[site.pos]
+        sd['occupied'] = get_occupied(site)
+        sd['possible'] = get_num_possible(world)
+        sd['viable'] = 0
+        sd['adjacent'] = set()
+        sd['occupiable'] = set()
+    for role in role_generator(world):
+        for site in world.sites.values():
+            sd = srd[site.pos]
+            v = check_viable(site, role)
+            a = check_adjacent(site, role)
+            o = a and v
+            if o:
+                sd['viable'] += 1
+                sd['adjacent'].add(role)
+                sd['occupiable'].add(role)
+            elif v:
+                sd['viable'] += 1
+            elif a:
+                sd['adjacent'].add(role)
+    for site in world.sites.values():
+        keys = ['Step', 'Site', 'Viable', 'Adjacent', 'Occupiable']
+        site.update_role_network()
+        sd = srd[site.pos]
+        values = [
+            world.schedule.time,
+            site.pos, 
+            sd['viable'],
+            len(sd['adjacent']),
+            len(sd['occupiable']),
+        ]
+        dc.add_table_row('Other Roles', {k:v for k,v in zip(keys, values)})
+        keys = ['Step', 'Site', 'Role', 'Pop']
+        for role, pop in sd['occupied'].items():
+            values = [world.schedule.time, site.pos, role.rolename, pop]
+            dc.add_table_row('Occupied Roles', {k:v for k,v in zip(keys, values)})
 
 # Graphics
 def draw_feature_interactions(world: "World"):
@@ -108,10 +169,15 @@ def env_features_dist(world: "World"):
         print(site, site.traits)
 
 def role_dist(world: "World"):
-    c = Counter([a.role for a in world.schedule.agents])
-    return c.most_common(len(c))
+    rd = world.roles_dict.values()
+    sd = world.sites
+    d = {r: sum([v for s in sd for v in r.phenotypes[s].values()]) for r in rd}
+    return d
 
 def phenotype_dist(world: "World"):
+    rd = world.roles_dict.values()
+    sd = world.sites
+    d = {v: sum([v for s in sd for r in rd for v in r.phenotypes[s].values()])}
     c = Counter([a.phenotype for a in world.schedule.agents])
     return c.most_common(len(c))
 
@@ -137,11 +203,8 @@ def print_matrix(interaction: "Interaction"):
         print([p for p in item.values()])
 
 def interaction_report(world: "World", full: bool = False):
-    interactions = [
-        x[2]
-        for x
-        in world.feature_interactions.edges(data='interaction')
-    ]
+    fi = world.feature_interactions
+    interactions = [x[2] for x in fi.edges(data='interaction')]
     if full:
         for i in interactions:
             print_matrix(i)
@@ -150,7 +213,12 @@ def interaction_report(world: "World", full: bool = False):
             print(i, avg_payoff(i))
 
 def occupied_roles_list(world: "World"):
-    return list(set([a.role for a in world.schedule.agents]))
+    rd = world.roles_dict.values()
+    sd = world.sites
+    return [r for r in rd if any([v > 0 for s in sd for v in r.phenotypes[s].values()])]
 
 def occupied_phenotypes_list(world: "World"):
-    return list(set([a.phenotype for a in world.schedule.agents]))
+    rd = world.roles_dict.values()
+    sd = world.sites
+    types = {p for r in rd for s in sd for p, n in r.phenotypes[s].items() if n > 0}
+    return list(types)
