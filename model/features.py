@@ -31,9 +31,17 @@ class Feature:
         self.model = model
         self.name = name_from_number(feature_id, lower=False)
         self.env = env
+        self.empty_steps = 0
+        self.empty_traits = {}
         self.values = []
         for i in range(num_values):
             self.values.append(self.new_value())
+        self.traits_dict = {
+            (x, y): {
+                'live': {},
+                'shadow':{}
+            } for _, x, y in self.model.grid.coord_iter()
+        }
 
     def new_value(self):
         self.next_value_id += 1
@@ -71,8 +79,37 @@ class Feature:
             for i_value in t.initiator.values:
                 del t.payoffs[i_value][value]
         self.values.remove(value)
+        del self.empty_steps[value]
+        for s in self.model.sites:
+            if value in self.traits_dict[s]["live"]:
+                del self.traits_dict[s]["live"][value]
+            if value in self.traits_dict[s]["shadow"]:
+                del self.traits_dict[s]["shadow"][value]
         print("Trait {0} removed from feature {1}".format(value, self))
 
+    def check_empty(self):
+        sd = self.model.sites
+        if sum([v for s in sd for v in self.traits_dict[s]["live"].values()]) == 0:
+            self.empty_steps += 1
+        else:
+            self.empty_steps = 0
+        td = self.traits_dict
+        for v in self.values:
+            if sum([td[s]["live"][v] for s in sd if v in td[s]["live"]]) == 0:
+                try:
+                    self.empty_traits[v] += 1
+                except KeyError:
+                    self.empty_traits[v] = 1
+            else:
+                self.empty_traits[v] = 0
+
+    def prune_traits(self):
+        prunable = [
+            t for t,c in self.empty_traits.items()
+            if c > self.model.feature_timeout
+        ]
+        for trait in prunable:
+            self.remove_trait(trait)
 
     def __repr__(self) -> str:
         return self.name
@@ -132,14 +169,16 @@ class Interaction:
 class Role:
     def __init__(
         self,
-        model: "World",
+        model: "Model",
         features: FrozenSet["Feature"],
     ):
         self.model = model
         self.features = features
         self.rolename = ".".join(sorted([f.name for f in features]))
         self.interactions = self.get_interactions()
-        self.phenotypes = {pos: {} for pos in self.model.sites}
+        self.phenotypes = {
+            (x,y): {} for _,x,y in self.model.grid.coord_iter()
+        }
 
     def get_interactions(self):
         fi = self.model.feature_interactions

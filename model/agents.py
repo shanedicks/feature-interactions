@@ -120,7 +120,7 @@ class Site:
 
     def get_feature_utility_dict(self):
         fud = {}
-        pop = len(self.model.grid.get_cell_list_contents(self.pos))
+        pop = len(self.agents())
         for f in self.model.get_features_list():
             scores = self.agent_feature_eu_dict(f)
             fud[f] = scores
@@ -177,15 +177,32 @@ class Agent(Agent):
         traits = sorted(["{0}{1}".format(f, v) for f, v in self.traits.items()])
         return "".join(traits)
 
-    def get_site(self):
+    def increment_phenotype(self):
+        pd = self.role.phenotypes[self.pos]
         try:
-            pd = self.role.phenotypes[self.pos]
+            pd[self.phenotype] += 1
         except KeyError:
-            self.role.phenotypes[self.pos] = {}
-            pd = self.role.phenotypes[self.pos]
-        if self.phenotype not in pd:
-            pd[self.phenotype] = 0
-        pd[self.phenotype] += 1
+            pd[self.phenotype] = 1
+        k = "shadow" if self.shadow else 'live'
+        for feature in self.traits:
+            trait = self.traits[feature]
+            td = feature.traits_dict[self.pos][k]
+            if trait not in td:
+                td[trait] = 0
+            try:
+                td[trait] += 1
+            except KeyError:
+                td[trait] = 1
+
+    def decrement_phenotype(self):
+        self.role.phenotypes[self.pos][self.phenotype] -= 1
+        k = "shadow" if self.shadow else 'live'
+        for feature in self.traits:
+            trait = self.traits[feature]
+            feature.traits_dict[self.pos][k][trait] -= 1
+
+    def get_site(self):
+        self.increment_phenotype()
         return self.model.sites[self.pos] 
 
     def get_role(self) -> Role:
@@ -319,7 +336,8 @@ class Agent(Agent):
                 if self.random.random() <= self.model.feature_gain_chance \
                 and len(features) > 0:
                     feature = self.random.choice(features)
-                else:
+                    child_traits[feature] = self.random.choice(feature.values)
+                elif len(child_traits) > 0:
                     key = self.random.choice(list(child_traits.keys()))
                     del child_traits[key]
         if len(child_traits) > 0 or self.shadow:
@@ -338,7 +356,7 @@ class Agent(Agent):
 
     def move(self) -> None:
         self.site.moved_out += 1
-        self.role.phenotypes[self.pos][self.phenotype] -= 1
+        self.decrement_phenotype()
         neighborhood = self.model.grid.get_neighborhood(
                 self.pos,
                 moore=True,
@@ -348,7 +366,7 @@ class Agent(Agent):
         if not self.shadow:
             sa = self.get_shadow_agent()
             sa.site.moved_out += 1
-            sa.role.phenotypes[sa.pos][sa.phenotype] -= 1
+            sa.decrement_phenotype()
             sa.model.grid.move_agent(sa, new_position)
             sa.site = sa.get_site()
             sa.site.moved_in += 1
@@ -359,7 +377,7 @@ class Agent(Agent):
     def die(self) -> None:
         if not self.shadow:
             self.model.schedule.remove(self)
-        self.role.phenotypes[self.pos][self.phenotype] -= 1
+        self.decrement_phenotype()
         self.model.grid.remove_agent(self)
         self.site.died += 1
 

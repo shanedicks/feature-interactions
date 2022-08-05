@@ -90,7 +90,7 @@ class World(Model):
         feature_mutate_chance: float = 0.001,
         feature_create_chance: float = 0.01,
         feature_gain_chance: float = 0.5,
-        snap_interval: int = 10
+        snap_interval: int = 10,
     ) -> None:
         super().__init__()
         self.feature_interactions = feature_interactions
@@ -117,10 +117,8 @@ class World(Model):
         self.roles_dict = {}
         self.site_roles_dict = {}
         self.sites = {}
-        self.born = 0
-        self.died = 0
-        self.moved = 0
         self.snap_interval = snap_interval
+        self.feature_timeout = 5 * snap_interval
         self.datacollector = DataCollector(
             model_reporters = {
                 "Pop": get_population,
@@ -130,15 +128,13 @@ class World(Model):
                 "Phenotypes": get_num_phenotypes,
                 "Features": get_num_agent_features,
                 "Roles": get_num_roles,
-                "Born": get_total_born,
-                "Died": get_total_died,
-                "Moved": get_total_moved
             },
             tables = {
-                "Occupied Roles": ['Step', 'Site', 'Role', 'Pop'],
-                "Other Roles": ['Step', 'Site', 'Viable', 'Adjacent', 'Occupiable'],
-                "Trait Dist": ['Step', 'Site', 'Feature', 'Trait', 'Count'],
-                "Site Pop": ['Step', 'Site', 'Born', 'Died', 'Moved In', 'Moved Out']
+                "Roles": ['Step', 'Site', 'Shadow', 'Role', 'Pop'],
+                "Phenotypes": ['Step', 'Site', 'Shadow', 'Phenotype', 'Pop'],
+                "Rolesets": ['Step', 'Site', 'Viable', 'Adjacent', 'Occupiable', "Occupied"],
+                "Traits": ['Step', 'Site', 'Shadow', 'Feature', 'Trait', 'Count'],
+                "Sites": ['Step', 'Site', 'Born', 'Died', 'Moved In', 'Moved Out']
             }
         )
         if self.feature_interactions is None:
@@ -219,6 +215,7 @@ class World(Model):
         return feature
 
     def remove_feature(self, feature: Feature) -> None:
+        print("Removing feature ", feature)
         in_edges = feature.in_edges()
         out_edges = feature.out_edges()
         self.feature_interactions.remove_node(feature)
@@ -236,6 +233,16 @@ class World(Model):
             del self.roles_dict[role.features]
         for role in affected_roles:
             role.interactions = role.get_interactions()
+
+    def prune_features(self):
+        for feature in self.get_features_list():
+            feature.check_empty()
+        pruneable = [
+            f for f in self.get_features_list()
+            if f.empty_steps >= self.feature_timeout
+        ]
+        for feature in pruneable:
+            self.remove_feature(feature)
 
     def create_agent(self, num_traits: int, utils:float = None) -> Agent:
         if utils is None:
@@ -277,6 +284,7 @@ class World(Model):
         self.schedule.step()
         self.shadow.step()
         self.verify_shadow()
+        self.prune_features()
         print(
             "Step{0}: {1} agents, {2} roles, {3} types, "
             "{4} new and {5} cached interactions".format(
@@ -294,4 +302,5 @@ class World(Model):
             evaluate_rolesets(self)
         env_report(self)
         self.datacollector.collect(self)
+        tables_update(self)
         print(role_dist(self))
