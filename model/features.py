@@ -106,7 +106,7 @@ class Feature:
     def prune_traits(self):
         prunable = [
             t for t,c in self.empty_traits.items()
-            if c > self.model.feature_timeout
+            if c >= self.model.trait_timeout
         ]
         for trait in prunable:
             self.remove_trait(trait)
@@ -176,6 +176,7 @@ class Role:
         self.features = features
         self.rolename = ".".join(sorted([f.name for f in features]))
         self.interactions = self.get_interactions()
+        self.neighbors = self.get_neighbors()
         self.phenotypes = {
             (x,y): {} for _,x,y in self.model.grid.coord_iter()
         }
@@ -191,6 +192,27 @@ class Role:
             x[2] for x in fi.in_edges(nbunch=features, data='interaction')
         ]
         return interactions
+
+    def get_neighbors(self):
+        roles = self.model.roles_dict.values()
+        neighbors = {}
+        neighbors["initiators"] = [
+            r for r in roles
+            if any(f in r.features for f in
+                [i.initiator for i in self.interactions['target']]
+            )
+        ]
+        neighbors["targets"] = [
+            r for r in roles
+            if any(f in r.features for f in
+                [i.target for i in self.interactions['initiator']]
+            )
+        ]
+        return neighbors
+
+    def update(self):
+        self.interactions = self.get_interactions()
+        self.neighbors = self.get_neighbors()
 
     def __repr__(self) -> str:
         return self.rolename

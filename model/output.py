@@ -1,12 +1,16 @@
-from collections import Counter
-from itertools import chain, combinations
-from typing import Dict, List, Tuple, Iterator
-from statistics import mean, median
 import matplotlib.pyplot as plt
 import networkx as nx
+import random
+from collections import Counter
+from itertools import chain, combinations
+from math import comb
+from statistics import mean, median, quantiles
+from typing import Dict, List, Set, Tuple, Iterator
+
+
 
 # Control
-def step_forward(world, num_steps):
+def step(world, num_steps):
     for i in range(num_steps):
         world.step()
 
@@ -108,7 +112,7 @@ def tables_update(world: "World") -> None:
 # Role Evaluation
 def check_viable(site: "Site", features: Tuple["Feature"]) -> bool:
     eu = sum([max(site.fud[f].values()) for f in features])
-    if eu - site.pop_cost < 0:
+    if eu - site.pop_cost < 0 or len(features)==0:
         return False
     else:
         return True
@@ -117,7 +121,7 @@ def check_adjacent(site: "Site", features: Tuple["Feature"]) -> bool:
     sd = site.model.site_roles_dict[site.pos]
     occupied = sd['occupied'].keys()
     for role in occupied:
-        if len(set(role.features) ^ set(features)) <= 1:
+        if len(set(role.features) ^ set(features)) <= 1 and len(features)>0:
             return True
     else:
         return False
@@ -139,42 +143,122 @@ def role_generator(world: "World") -> Iterator[Tuple['Feature']]:
 def evaluate_rolesets(world: "World") -> None:
     dc = world.datacollector
     srd = world.site_roles_dict
+    feature_set = world.get_features_list()
     for site in world.sites.values():
         site.pop_cost = site.get_pop_cost()
         site.fud = site.get_feature_utility_dict()
         sd = srd[site.pos]
         sd['occupied'] = get_occupied(site)
         sd['possible'] = get_num_possible(world)
-        sd['viable'] = 0
-        sd['adjacent'] = set()
-        sd['occupiable'] = set()
-    for role in role_generator(world):
-        for site in world.sites.values():
-            sd = srd[site.pos]
-            v = check_viable(site, role)
-            a = check_adjacent(site, role)
-            o = a and v
-            if o:
-                sd['viable'] += 1
-                sd['adjacent'].add(role)
-                sd['occupiable'].add(role)
-            elif v:
-                sd['viable'] += 1
-            elif a:
-                sd['adjacent'].add(role)
-    for site in world.sites.values():
-        keys = ['Step', 'Site', 'Viable', 'Adjacent', 'Occupiable', "Occupied"]
+        sd['viable'] = count_viable(site)
         site.update_role_network()
-        sd = srd[site.pos]
+        adjacent = set()
+        occupiable = set()
+        for role in sd['occupied']:
+            features = [f for f in feature_set if f not in role.features]
+            role = sorted([f for f in role.features], key=lambda x: x.name)
+            role = tuple(role)
+            adjacent.add(role)
+            if check_viable(site, role):
+                occupiable.add(role)
+            def handle(feature, add):
+                adj_role = [f for f in role]
+                if add:
+                    adj_role.append(feature)
+                else:
+                    adj_role.remove(feature)
+                adj_role = sorted(adj_role, key=lambda x: x.name)
+                adj_role = tuple(adj_role)
+                if len(adj_role) > 0:
+                    adjacent.add(adj_role)
+                    if check_viable(site, adj_role):
+                        occupiable.add(adj_role)
+            for feature in features:
+                handle(feature, True)
+            for feature in role:
+                handle(feature, False)
+        sd['adjacent'] = len(adjacent)
+        sd['occupiable'] = len(occupiable)
+        keys = ['Step', 'Site', "Possible",'Viable', 'Adjacent', 'Occupiable', "Occupied"]
         values = [
             world.schedule.time,
-            site.pos, 
+            site.pos,
+            2 ** len(feature_set),
             sd['viable'],
-            len(sd['adjacent']),
-            len(sd['occupiable']),
+            sd['adjacent'],
+            sd['occupiable'],
             len(sd['occupied'])
         ]
         dc.add_table_row('Rolesets', {k:v for k,v in zip(keys, values)})
+
+def count_viable(site):
+    fud = site.fud
+    pop_cost = site.pop_cost
+    best = sorted([max(fud[f].values()) for f in fud])
+    if best[::-1][0] == pop_cost and pop_cost == 0:
+        zeros = [x for x in best if x == 0]
+        return sum([comb(len(zeros),i) for i in range(1, len(zeros) + 1)])
+    if sum([x for x in best if x > 0]) < pop_cost:
+        return 0
+    long = 0
+    scores = []
+    while sum(scores) <= pop_cost and long < len(best):
+        scores.append(best[long])
+        long += 1
+    if long < len(best):
+        combs = sum([comb(len(best),i) for i in range(long, len(best) + 1)])
+    elif sum(scores) >= pop_cost:
+        combs = 1
+    else:
+        combs = 0
+    best.reverse()
+    short = 0
+    scores.clear()
+    while sum(scores) <= pop_cost and short < len(best):
+        scores.append(best[short])
+        short += 1
+    moves = [(i, i+1) for i in range(len(best)-1)]
+    for length in range(short, long):
+        history = {}
+        roots = []
+        indices = [i for i in range(length)]
+        scores = [best[i] for i in indices]
+        next_moves = list(filter(
+            lambda x: x[0] in indices and x[1] not in indices,
+            moves
+        ))
+        while (sum(scores) >= pop_cost and len(next_moves) > 0) or len(roots) > 0:
+            if (sum(scores) < pop_cost or len(next_moves) == 0) and len(roots) > 0:
+                indices = roots[-1]
+                scores = [best[i] for i in indices]
+                next_moves = list(filter(
+                    lambda x: x[0] in indices 
+                    and x[1] not in indices
+                    and x not in history[tuple(indices)],
+                    moves
+                ))
+                roots.pop()
+            if tuple(indices) not in history:
+                history[tuple(indices)] = []
+                if sum(scores) >= pop_cost:
+                    combs += 1
+            o,n = max(next_moves)
+            history[tuple(indices)].append((o,n))
+            indices[indices.index(o)] = n
+            scores = [best[i] for i in indices]
+            if tuple(indices) not in history:
+                history[tuple(indices)] = []
+                if sum(scores) >= pop_cost:
+                    combs += 1
+            next_moves = list(filter(
+                lambda x: x[0] in indices 
+                and x[1] not in indices
+                and x not in history[tuple(indices)],
+                moves
+            ))
+            if len(next_moves) > 1 and sum(scores) > pop_cost:
+                roots.append(indices.copy())
+    return combs
 
 # Graphics
 def draw_feature_interactions(world: "World") -> None:
@@ -271,20 +355,20 @@ def phenotype_dist(model: "Model", site: Tuple[int, int] = None) -> Dict[str, in
     return {k:v for k,v in d.items() if v > 0}
 
 def env_report(world: "World"):
-    for site in world.sites.values():
-        pop = len(world.grid.get_cell_list_contents(site.pos))
-        utils = {k: round(v, 2) for k, v in site.utils.items()}
-        print(site, pop, round(site.pop_cost,2), utils)
+    for s in world.sites.values():
+        pop = len(world.grid.get_cell_list_contents(s.pos))
+        utils = {k: round(v, 2) for k, v in s.utils.items()}
+        print(s.pos, pop, s.born - s.died, round(s.pop_cost,2), utils)
 
 def get_feature_by_name(world: "World", name: str):
     f = [f for f in world.feature_interactions.nodes if f.name is name]
     f = f[0] if len(f) > 0 else None
     return f
 
-def avg_payoff(interaction: "Interaction"):
+def payoff_quantiles(interaction: "Interaction"):
     i = [p[0] for item in interaction.payoffs.values() for p in item.values()]
     t = [p[1] for item in interaction.payoffs.values() for p in item.values()]
-    return(round(mean(i),2), round(mean(t),2))
+    return([round(q,2) for q in quantiles(i)], [round(q,2) for q in quantiles(t)])
 
 def print_matrix(interaction: "Interaction"):
     print(interaction)
@@ -299,7 +383,7 @@ def interaction_report(world: "World", full: bool = False):
             print_matrix(i)
     else:
         for i in interactions:
-            print(i, avg_payoff(i))
+            print(i, payoff_quantiles(i))
 
 def occupied_roles_list(model: "Model"):
     rd = model.roles_dict.values()
@@ -318,6 +402,11 @@ def roles_dataframes(world: "World") -> Tuple['Dataframe', 'Dataframe']:
     rdf = dc.get_table_dataframe('Roles')
     live = rdf.loc[rdf.Shadow==False].groupby(['Step', 'Role']).sum()
     live = live.unstack()['Pop']
-    shadow = rdf.loc[rdf.Shadow==True].groupby(['Step', 'Role']).sum().unstack()
+    shadow = rdf.loc[rdf.Shadow==True].groupby(['Step', 'Role']).sum()
     shadow = shadow.unstack()['Pop']
     return (live, shadow)
+
+def traits_dataframes(world: "World") -> Tuple['Dataframe', 'Dataframe']:
+    dc = world.datacollector
+    tdf = dc.get_table_dataframe('Traits')
+    live = tdf.loc[tdf.Shadow==False]

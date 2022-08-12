@@ -4,6 +4,8 @@ from mesa import Agent
 from features import Role
 from output import *
 
+Lfd = Dict["Feature", Dict[str, Union[int, Dict[str, int], Dict[str, float]]]]
+
 class Site:
 
     def __init__(
@@ -35,14 +37,15 @@ class Site:
         else:
             self.traits = traits
 
-    def agents(self):
+    def agents(self) -> List['Agent']:
         return self.model.grid.get_cell_list_contents(self.pos)
 
-    def get_pop(self):
+    def get_pop(self) -> int:
         return len(self.agents())
 
-    def get_pop_cost(self):
-        return (self.get_pop() / self.model.site_pop_limit) ** self.model.pop_cost_exp
+    def get_pop_cost(self) -> float:
+        m = self.model
+        return float((self.get_pop() / m.site_pop_limit) ** m.pop_cost_exp)
 
     def reset(self):
         self.born = 0
@@ -64,17 +67,24 @@ class Site:
     def get_local_features_dict(self):
         lfd = {}
         for f in self.model.get_features_list():
-            c = Counter([a.traits[f] for a in self.agents() if f in a.traits])
             lfd[f] = {}
-            lfd[f]['traits'] = dict(c)
+            lfd[f]['traits'] = f.traits_dict[self.pos]["live"]
             total = sum(lfd[f]['traits'].values())
             lfd[f]['total'] = total
-            lfd[f]['dist'] = {i: c/total for i, c in dict(c).items()}
+            if total > 0:
+                lfd[f]['dist'] = {i: c/total for i, c in lfd[f]['traits'].items()}
+            else:
+                lfd[f]['dist'] = {i: 0 for i in lfd[f]['traits']}
         return lfd
 
-    def env_feature_weight(self, feature):
+    def env_feature_weight(
+            self,
+            feature: "Feature",
+            lfd: Lfd = None
+        ) -> Union[int, float]:
         # Get the chance of initiating an interaction against Feature for an agent at a given site
-        lfd = self.get_local_features_dict()
+        if lfd is None:
+            lfd = self.get_local_features_dict()
         lt = self.traits[feature]
         edges = feature.in_edges()
         pop = sum([
@@ -92,7 +102,10 @@ class Site:
             num_ints = self.utils[feature]/-avg_impact
             return min([num_ints/pop, 1])
 
-    def agent_feature_eu_dict(self, feature):
+    def agent_feature_eu_dict(
+            self,
+            feature
+        ) -> Dict[str, float]:
         # Get the expected utility for each trait of Feature for an Agent at a given site
         lfd = self.get_local_features_dict()
         pop = len(self.agents())
@@ -107,7 +120,7 @@ class Site:
                 eu += weight * sum([edge.payoffs[i][v][1]*dist[i] for i in dist])
             for edge in out_edges:
                 if edge.target in self.traits.keys():
-                    weight = self.env_feature_weight(edge.target)
+                    weight = self.env_feature_weight(edge.target, lfd)
                     eu += weight * edge.payoffs[v][self.traits[edge.target]][0]
                 elif edge.target.env:
                     continue
@@ -118,7 +131,7 @@ class Site:
             scores[v] = eu
         return scores
 
-    def get_feature_utility_dict(self):
+    def get_feature_utility_dict(self) -> Dict["Feature", float]:
         fud = {}
         pop = len(self.agents())
         for f in self.model.get_features_list():
@@ -175,7 +188,7 @@ class Agent(Agent):
     @property
     def phenotype(self) -> str:
         traits = sorted(["{0}{1}".format(f, v) for f, v in self.traits.items()])
-        return "".join(traits)
+        return ".".join(traits)
 
     def increment_phenotype(self):
         pd = self.role.phenotypes[self.pos]
@@ -304,10 +317,7 @@ class Agent(Agent):
                 self.model.new += 1
                 if self.phenotype not in cache:
                     cache[self.phenotype] = {}
-                if agent.phenotype not in cache:
-                    cache[agent.phenotype] = {}
                 cache[self.phenotype][agent.phenotype] = payoffs
-                cache[agent.phenotype][self.phenotype] = tuple(reversed(payoffs))
                 if agent.utils < 0:
                     agent.die()
 

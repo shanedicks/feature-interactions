@@ -75,22 +75,24 @@ class World(Model):
         feature_interactions: nx.digraph.DiGraph = None,
         init_env_features: int = 5,
         init_agent_features: int = 3,
-        max_feature_interactions: int = 4,
-        init_agents: int = 100,
+        max_feature_interactions: int = 5,
+        init_agents: int = 50,
         base_agent_utils: float = 0.0,
-        base_env_utils: float = 10.0,
+        base_env_utils: float = 50.0,
         total_pop_limit = 6000,
         pop_cost_exp = 2,
-        grid_size: int = 2,
+        grid_size: int = 3,
         repr_multi: int = 1,
         mortality: float = 0.02,
         move_chance: float = 0.01,
         trait_mutate_chance: float = 0.01,
-        trait_create_chance: float = 0.005,
+        trait_create_chance: float = 0.001,
         feature_mutate_chance: float = 0.001,
-        feature_create_chance: float = 0.01,
+        feature_create_chance: float = 0.001,
         feature_gain_chance: float = 0.5,
-        snap_interval: int = 10,
+        snap_interval: int = 50,
+        feature_timeout: int = 10,
+        trait_timeout: int = 10,
     ) -> None:
         super().__init__()
         self.feature_interactions = feature_interactions
@@ -118,7 +120,8 @@ class World(Model):
         self.site_roles_dict = {}
         self.sites = {}
         self.snap_interval = snap_interval
-        self.feature_timeout = 5 * snap_interval
+        self.feature_timeout = feature_timeout
+        self.trait_timeout = trait_timeout
         self.datacollector = DataCollector(
             model_reporters = {
                 "Pop": get_population,
@@ -168,6 +171,7 @@ class World(Model):
         print(role_dist(self))
         print("Interaction Report ------------")
         interaction_report(self)
+        draw_feature_interactions(self)
 
     def next_feature_id(self) -> int:
         self.current_feature_id += 1
@@ -229,10 +233,19 @@ class World(Model):
             role for role in self.roles_dict.values()
             if feature in role.features
         ]
+        sd = self.sites
+        cache = self.cached_payoffs
         for role in roles_to_remove:
+            pl = [p for s in sd for p in role.phenotypes[s].keys()]
+            for phenotype in pl:
+                keys = [k for k, v in cache.items() if v == phenotype]
+                if phenotype in cache:
+                    del cache[phenotype]
+                for k in keys:
+                    del cache[k][phenotype]
             del self.roles_dict[role.features]
         for role in affected_roles:
-            role.interactions = role.get_interactions()
+            role.update()
 
     def prune_features(self):
         for feature in self.get_features_list():
@@ -287,20 +300,19 @@ class World(Model):
         self.prune_features()
         print(
             "Step{0}: {1} agents, {2} roles, {3} types, "
-            "{4} new and {5} cached interactions".format(
+            "{6} features | {4} new and {5} cached interactions".format(
                 self.schedule.time,
                 self.schedule.get_agent_count(),
                 len(set(occupied_roles_list(self))),
                 len(set(occupied_phenotypes_list(self))),
                 self.new,
-                self.cached
+                self.cached,
+                get_num_agent_features(self)
             )
         )
-        born, died = get_total_born(self), get_total_died(self)
-        print("{0} born and {1} died".format(born, died))
         if self.schedule.time % self.snap_interval == 0:
             evaluate_rolesets(self)
-        env_report(self)
         self.datacollector.collect(self)
         tables_update(self)
+        env_report(self)
         print(role_dist(self))
