@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import networkx as nx
+import pandas as pd
 import random
 from collections import Counter
 from itertools import chain, combinations
@@ -47,18 +48,6 @@ def get_total_died(world: "World") -> int:
 def get_total_moved(world: "World") -> int:
     return sum([site.moved_in for site in world.sites.values()])
 
-def write_roles_rows(
-        model: "Model",
-        step: int,
-        dc: "datacollector",
-        shadow: bool = False,
-    ) -> None:
-    keys = ['Step', 'Site', 'Shadow', 'Role', 'Pop']
-    for site in model.sites:
-        roles = role_dist(model, site)
-        for role, pop in roles.items():
-            values = [step, site, shadow, role.rolename, pop]
-            dc.add_table_row('Roles', {k:v for k,v in zip(keys, values)})
 
 def write_phenotypes_rows(
         model: "Model",
@@ -73,20 +62,6 @@ def write_phenotypes_rows(
             values = [step, site, shadow, phenotype, pop]
             dc.add_table_row('Phenotypes', {k:v for k,v in zip(keys, values)})
 
-def write_traits_rows(
-        model: "Model",
-        step: int,
-        dc: "datacollector",
-        shadow: bool = False,
-    ) -> None:
-    keys = ['Step', 'Site', 'Shadow', 'Feature', 'Trait', 'Count']
-    for site in model.sites:
-        traits = traits_dist(model, site, shadow)
-        for feature in traits:
-            for trait, pop in traits[feature].items():
-                values = [step, site, shadow, feature.name, trait, pop]
-                dc.add_table_row('Traits', {k: v for k,v in zip(keys,values)})
-
 def write_sites_rows(
         world: "World",
         step: int,
@@ -100,12 +75,8 @@ def write_sites_rows(
 def tables_update(world: "World") -> None:
     dc = world.datacollector
     step = world.schedule.time
-    write_roles_rows(world, step, dc)
-    write_roles_rows(world.shadow, step, dc, True)
     write_phenotypes_rows(world, step, dc)
-    write_phenotypes_rows(world, step, dc, True)
-    write_traits_rows(world, step, dc)
-    write_traits_rows(world, step, dc, True)
+    write_phenotypes_rows(world.shadow, step, dc, True)
     write_sites_rows(world, step, dc)
 
 
@@ -131,7 +102,7 @@ def get_num_possible(world: "World") -> int:
 
 def get_occupied(site: "Site") ->Dict['Role', int]:
     rd = site.model.roles_dict.values()
-    d = {r: sum(r.phenotypes[site.pos].values()) for r in rd}
+    d = {r: sum(r.types[site.pos].values()) for r in rd}
     return {k:v for k,v in d.items() if v > 0}
 
 def role_generator(world: "World") -> Iterator[Tuple['Feature']]:
@@ -331,27 +302,24 @@ def role_dist(model: "Model", site: Tuple[int, int] = None) -> Dict['Role', int]
     if site is None:
         sd = model.sites
         for r in model.roles_dict.values():
-            d[r] = sum([v for s in sd for v in r.phenotypes[s].values()])
+            d[r] = sum([v for s in sd for v in r.types[s].values()])
     else:
         for r in model.roles_dict.values():
-            d[r] = sum([v for v in r.phenotypes[site].values()])
+            d[r] = sum([v for v in r.types[site].values()])
     return {role: count for role, count in d.items() if count > 0}
 
 def phenotype_dist(model: "Model", site: Tuple[int, int] = None) -> Dict[str, int]:
     rd = model.roles_dict.values()
-    l = sorted(occupied_phenotypes_list(model))
     d = {}
     if site is None:
         sd = model.sites
-        for p in l:
-            d[p] = sum(
-                [r.phenotypes[s][p] for s in sd for r in rd if p in r.phenotypes[s]]
-            )
+        l = {(p,r) for r in rd for s in sd for p,n in r.types[s].items() if n > 0}
+        for p,r in l:
+            d[p] = sum([r.types[s][p] for s in sd if p in r.types[s]])
     else:
+        l = {(p,r) for r in rd for p,n in r.types[site].items() if n > 0}
         for p in l:
-            d[p] = sum(
-                [r.phenotypes[site][p] for r in rd if p in r.phenotypes[site]]
-            )
+            d[p] = r.types[site][p]
     return {k:v for k,v in d.items() if v > 0}
 
 def env_report(world: "World"):
@@ -364,6 +332,10 @@ def get_feature_by_name(world: "World", name: str):
     f = [f for f in world.feature_interactions.nodes if f.name is name]
     f = f[0] if len(f) > 0 else None
     return f
+
+def get_role_by_name(world: "World", name: str):
+    f = [f for f in world.feature_interactions.nodes if f.name in name.split(":")]
+    return world.roles_dict.get(frozenset(f), None)
 
 def payoff_quantiles(interaction: "Interaction"):
     i = [p[0] for item in interaction.payoffs.values() for p in item.values()]
@@ -388,25 +360,10 @@ def interaction_report(world: "World", full: bool = False):
 def occupied_roles_list(model: "Model"):
     rd = model.roles_dict.values()
     sd = model.sites
-    return [r for r in rd if any([v > 0 for s in sd for v in r.phenotypes[s].values()])]
+    return [r for r in rd if any([v > 0 for s in sd for v in r.types[s].values()])]
 
 def occupied_phenotypes_list(model: "Model"):
     rd = model.roles_dict.values()
     sd = model.sites
-    types = {p for r in rd for s in sd for p, n in r.phenotypes[s].items() if n > 0}
+    types = {p for r in rd for s in sd for p, n in r.types[s].items() if n > 0}
     return list(types)
-
-# Dataframes
-def roles_dataframes(world: "World") -> Tuple['Dataframe', 'Dataframe']:
-    dc = world.datacollector
-    rdf = dc.get_table_dataframe('Roles')
-    live = rdf.loc[rdf.Shadow==False].groupby(['Step', 'Role']).sum()
-    live = live.unstack()['Pop']
-    shadow = rdf.loc[rdf.Shadow==True].groupby(['Step', 'Role']).sum()
-    shadow = shadow.unstack()['Pop']
-    return (live, shadow)
-
-def traits_dataframes(world: "World") -> Tuple['Dataframe', 'Dataframe']:
-    dc = world.datacollector
-    tdf = dc.get_table_dataframe('Traits')
-    live = tdf.loc[tdf.Shadow==False]

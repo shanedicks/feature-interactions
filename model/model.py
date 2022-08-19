@@ -76,9 +76,9 @@ class World(Model):
         init_env_features: int = 5,
         init_agent_features: int = 3,
         max_feature_interactions: int = 5,
-        init_agents: int = 50,
+        init_agents: int = 100,
         base_agent_utils: float = 0.0,
-        base_env_utils: float = 50.0,
+        base_env_utils: float = 100.0,
         total_pop_limit = 6000,
         pop_cost_exp = 2,
         grid_size: int = 3,
@@ -93,6 +93,7 @@ class World(Model):
         snap_interval: int = 50,
         feature_timeout: int = 10,
         trait_timeout: int = 10,
+        target_sample: int = 1
     ) -> None:
         super().__init__()
         self.feature_interactions = feature_interactions
@@ -122,6 +123,7 @@ class World(Model):
         self.snap_interval = snap_interval
         self.feature_timeout = feature_timeout
         self.trait_timeout = trait_timeout
+        self.target_sample = target_sample
         self.datacollector = DataCollector(
             model_reporters = {
                 "Pop": get_population,
@@ -133,10 +135,8 @@ class World(Model):
                 "Roles": get_num_roles,
             },
             tables = {
-                "Roles": ['Step', 'Site', 'Shadow', 'Role', 'Pop'],
                 "Phenotypes": ['Step', 'Site', 'Shadow', 'Phenotype', 'Pop'],
                 "Rolesets": ['Step', 'Site', 'Viable', 'Adjacent', 'Occupiable', "Occupied"],
-                "Traits": ['Step', 'Site', 'Shadow', 'Feature', 'Trait', 'Count'],
                 "Sites": ['Step', 'Site', 'Born', 'Died', 'Moved In', 'Moved Out']
             }
         )
@@ -149,8 +149,6 @@ class World(Model):
                 self.create_feature()
         else:
             self.current_feature_id = len(self.feature_interactions.number_of_nodes())
-        self.roles_network = nx.DiGraph()
-        self.roles_network.add_nodes_from(self.get_features_list(env=True))
         for _, x, y in self.grid.coord_iter():
             pos = (x,y)
             site = Site(model = self, pos = pos)
@@ -236,7 +234,7 @@ class World(Model):
         sd = self.sites
         cache = self.cached_payoffs
         for role in roles_to_remove:
-            pl = [p for s in sd for p in role.phenotypes[s].keys()]
+            pl = [p for s in sd for p in role.types[s].keys()]
             for phenotype in pl:
                 keys = [k for k, v in cache.items() if v == phenotype]
                 if phenotype in cache:
@@ -250,6 +248,7 @@ class World(Model):
     def prune_features(self):
         for feature in self.get_features_list():
             feature.check_empty()
+            feature.prune_traits()
         pruneable = [
             f for f in self.get_features_list()
             if f.empty_steps >= self.feature_timeout
@@ -312,7 +311,7 @@ class World(Model):
         )
         if self.schedule.time % self.snap_interval == 0:
             evaluate_rolesets(self)
-        self.datacollector.collect(self)
         tables_update(self)
+        self.datacollector.collect(self)
         env_report(self)
         print(role_dist(self))

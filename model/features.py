@@ -38,8 +38,6 @@ class Feature:
             self.values.append(self.new_value())
         self.traits_dict = {
             (x, y): {
-                'live': {},
-                'shadow':{}
             } for _, x, y in self.model.grid.coord_iter()
         }
 
@@ -71,31 +69,32 @@ class Feature:
         return value
 
     def remove_trait(self, value: str):
-        initated = self.out_edges()
+        initiated = self.out_edges()
         targeted = self.in_edges()
         for i in initiated:
             del i.payoffs[value]
         for t in targeted:
             for i_value in t.initiator.values:
-                del t.payoffs[i_value][value]
+                try:
+                    del t.payoffs[i_value][value]
+                except KeyError as e:
+                    print(e)
         self.values.remove(value)
-        del self.empty_steps[value]
+        del self.empty_traits[value]
         for s in self.model.sites:
-            if value in self.traits_dict[s]["live"]:
-                del self.traits_dict[s]["live"][value]
-            if value in self.traits_dict[s]["shadow"]:
-                del self.traits_dict[s]["shadow"][value]
+            if value in self.traits_dict[s]:
+                del self.traits_dict[s][value]
         print("Trait {0} removed from feature {1}".format(value, self))
 
     def check_empty(self):
         sd = self.model.sites
-        if sum([v for s in sd for v in self.traits_dict[s]["live"].values()]) == 0:
+        if sum([v for s in sd for v in self.traits_dict[s].values()]) == 0:
             self.empty_steps += 1
         else:
             self.empty_steps = 0
         td = self.traits_dict
         for v in self.values:
-            if sum([td[s]["live"][v] for s in sd if v in td[s]["live"]]) == 0:
+            if sum([td[s][v] for s in sd if v in td[s]]) == 0:
                 try:
                     self.empty_traits[v] += 1
                 except KeyError:
@@ -174,10 +173,10 @@ class Role:
     ):
         self.model = model
         self.features = features
-        self.rolename = ".".join(sorted([f.name for f in features]))
+        self.rolename = ":".join(sorted([f.name for f in features]))
         self.interactions = self.get_interactions()
         self.neighbors = self.get_neighbors()
-        self.phenotypes = {
+        self.types = {
             (x,y): {} for _,x,y in self.model.grid.coord_iter()
         }
 

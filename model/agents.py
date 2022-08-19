@@ -68,7 +68,7 @@ class Site:
         lfd = {}
         for f in self.model.get_features_list():
             lfd[f] = {}
-            lfd[f]['traits'] = f.traits_dict[self.pos]["live"]
+            lfd[f]['traits'] = f.traits_dict[self.pos]
             total = sum(lfd[f]['traits'].values())
             lfd[f]['total'] = total
             if total > 0:
@@ -187,32 +187,32 @@ class Agent(Agent):
 
     @property
     def phenotype(self) -> str:
-        traits = sorted(["{0}{1}".format(f, v) for f, v in self.traits.items()])
-        return ".".join(traits)
+        traits = sorted(["{0}.{1}".format(f, v) for f, v in self.traits.items()])
+        return ":".join(traits)
 
     def increment_phenotype(self):
-        pd = self.role.phenotypes[self.pos]
+        pd = self.role.types[self.pos]
         try:
             pd[self.phenotype] += 1
         except KeyError:
             pd[self.phenotype] = 1
-        k = "shadow" if self.shadow else 'live'
-        for feature in self.traits:
-            trait = self.traits[feature]
-            td = feature.traits_dict[self.pos][k]
-            if trait not in td:
-                td[trait] = 0
-            try:
-                td[trait] += 1
-            except KeyError:
-                td[trait] = 1
+        if not self.shadow:
+            for feature in self.traits:
+                trait = self.traits[feature]
+                td = feature.traits_dict[self.pos]
+                if trait not in td:
+                    td[trait] = 0
+                try:
+                    td[trait] += 1
+                except KeyError:
+                    td[trait] = 1
 
     def decrement_phenotype(self):
-        self.role.phenotypes[self.pos][self.phenotype] -= 1
-        k = "shadow" if self.shadow else 'live'
-        for feature in self.traits:
-            trait = self.traits[feature]
-            feature.traits_dict[self.pos][k][trait] -= 1
+        self.role.types[self.pos][self.phenotype] -= 1
+        if not self.shadow:
+            for feature in self.traits:
+                trait = self.traits[feature]
+                feature.traits_dict[self.pos][trait] -= 1
 
     def get_site(self):
         self.increment_phenotype()
@@ -238,6 +238,7 @@ class Agent(Agent):
     def get_agent_target(self) -> Union[Agent, None]:
         initiating = self.role.interactions['initiator']
         target_features = [x.target for x in initiating if x.target.env == False]
+        n = self.model.target_sample
         def targetable(target):
             if target.utils >= 0 \
             and any(f in target.traits for f in target_features) \
@@ -245,7 +246,7 @@ class Agent(Agent):
                 return True
             else:
                 return False
-        return next(filter(targetable, self.site.shuffled_sample(100)), None)
+        return next(filter(targetable, self.site.shuffled_sample(n)), None)
 
     def do_env_interactions(self) -> None:
         interactions = [
@@ -395,7 +396,7 @@ class Agent(Agent):
         self.start = self.utils
         if self.utils >= 0:
             self.interact()
-        pop_cost = self.model.sites[self.pos].pop_cost
+        pop_cost = self.model.sites[self.pos].pop_cost * len(self.traits)
         self.utils -= pop_cost
         if self.utils < 0 or self.random.random() < self.model.mortality:
             self.die()
