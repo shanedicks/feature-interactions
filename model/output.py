@@ -83,7 +83,8 @@ def tables_update(world: "World") -> None:
 # Role Evaluation
 def check_viable(site: "Site", features: Tuple["Feature"]) -> bool:
     eu = sum([max(site.fud[f].values()) for f in features])
-    if eu - site.pop_cost < 0 or len(features)==0:
+    cost = site.pop_cost * (len(features) ** site.model.feature_cost_exp)
+    if eu - cost < 0 or len(features)==0:
         return False
     else:
         return True
@@ -165,6 +166,7 @@ def evaluate_rolesets(world: "World") -> None:
 def count_viable(site):
     fud = site.fud
     pop_cost = site.pop_cost
+    f_exp = site.model.feature_cost_exp
     best = sorted([max(fud[f].values()) for f in fud])
     if best[::-1][0] == pop_cost and pop_cost == 0:
         zeros = [x for x in best if x == 0]
@@ -173,7 +175,7 @@ def count_viable(site):
         return 0
     long = 0
     scores = []
-    while sum(scores) <= pop_cost and long < len(best):
+    while sum(scores) <= (pop_cost * (long ** f_exp)) and long < len(best):
         scores.append(best[long])
         long += 1
     if long < len(best):
@@ -185,7 +187,7 @@ def count_viable(site):
     best.reverse()
     short = 0
     scores.clear()
-    while sum(scores) <= pop_cost and short < len(best):
+    while sum(scores) <= (pop_cost * (short ** f_exp)) and short < len(best):
         scores.append(best[short])
         short += 1
     moves = [(i, i+1) for i in range(len(best)-1)]
@@ -198,8 +200,8 @@ def count_viable(site):
             lambda x: x[0] in indices and x[1] not in indices,
             moves
         ))
-        while (sum(scores) >= pop_cost and len(next_moves) > 0) or len(roots) > 0:
-            if (sum(scores) < pop_cost or len(next_moves) == 0) and len(roots) > 0:
+        while (sum(scores) >= (pop_cost * (length ** f_exp)) and len(next_moves) > 0) or len(roots) > 0:
+            if (sum(scores) < (pop_cost * (length ** f_exp)) or len(next_moves) == 0) and len(roots) > 0:
                 indices = roots[-1]
                 scores = [best[i] for i in indices]
                 next_moves = list(filter(
@@ -211,7 +213,7 @@ def count_viable(site):
                 roots.pop()
             if tuple(indices) not in history:
                 history[tuple(indices)] = []
-                if sum(scores) >= pop_cost:
+                if sum(scores) >= (pop_cost * (length ** f_exp)):
                     combs += 1
             o,n = max(next_moves)
             history[tuple(indices)].append((o,n))
@@ -219,7 +221,7 @@ def count_viable(site):
             scores = [best[i] for i in indices]
             if tuple(indices) not in history:
                 history[tuple(indices)] = []
-                if sum(scores) >= pop_cost:
+                if sum(scores) >= (pop_cost * (length ** f_exp)):
                     combs += 1
             next_moves = list(filter(
                 lambda x: x[0] in indices 
@@ -227,7 +229,7 @@ def count_viable(site):
                 and x not in history[tuple(indices)],
                 moves
             ))
-            if len(next_moves) > 1 and sum(scores) > pop_cost:
+            if len(next_moves) > 1 and sum(scores) > (pop_cost * (length ** f_exp)):
                 roots.append(indices.copy())
     return combs
 
@@ -277,9 +279,7 @@ def env_features_dist(world: "World"):
 def traits_dist(
         model: "Model",
         site: Tuple[int, int] = None,
-        shadow: bool = False
     ) -> Dict["Feature", Dict[str, int]]:
-    k = 'shadow' if shadow else 'live'
     if site is None:
         sd = model.sites
         d = {}
@@ -287,14 +287,14 @@ def traits_dist(
             d[f] = {}
             for v in f.values:
                 c = sum(
-                    [f.traits_dict[s][k][v] for s in sd if v in f.traits_dict[s][k]]
+                    [f.traits_dict[s][v] for s in sd if v in f.traits_dict[s]]
                 )
                 if c > 0:
                     d[f][v] = c
     else:
         d = {}
         for f in model.get_features_list():
-            d[f] = {v: c for v,c in f.traits_dict[site][k].items() if c > 0}
+            d[f] = {v: c for v,c in f.traits_dict[site].items() if c > 0}
     return d
 
 def role_dist(model: "Model", site: Tuple[int, int] = None) -> Dict['Role', int]:
@@ -318,7 +318,7 @@ def phenotype_dist(model: "Model", site: Tuple[int, int] = None) -> Dict[str, in
             d[p] = sum([r.types[s][p] for s in sd if p in r.types[s]])
     else:
         l = {(p,r) for r in rd for p,n in r.types[site].items() if n > 0}
-        for p in l:
+        for p,r in l:
             d[p] = r.types[site][p]
     return {k:v for k,v in d.items() if v > 0}
 

@@ -232,8 +232,7 @@ class Agent(Agent):
         return role
 
     def get_shadow_agent(self) -> Agent:
-        agents = self.model.shadow.sites[self.pos].agents()
-        return self.random.choice(agents)
+        return self.random.choice(self.model.shadow.sites[self.pos].agents())
 
     def get_agent_target(self) -> Union[Agent, None]:
         initiating = self.role.interactions['initiator']
@@ -333,7 +332,10 @@ class Agent(Agent):
                 and not self.shadow:
                     child_traits[feature] = feature.create_trait()
                 else:
-                    child_traits[feature] = self.random.choice(new_traits)
+                    try:
+                        child_traits[feature] = self.random.choice(new_traits)
+                    except IndexError:
+                        pass
         if self.random.random() <= self.model.feature_mutate_chance:
             if self.random.random() <= self.model.feature_create_chance \
             and not self.shadow:
@@ -361,6 +363,8 @@ class Agent(Agent):
             )
             if not self.shadow:
                 self.model.schedule.add(new_agent)
+                sa = self.get_shadow_agent()
+                sa.reproduce()
             self.model.grid.place_agent(new_agent, self.pos)
             new_agent.site = new_agent.get_site()
             self.site.born += 1
@@ -388,6 +392,8 @@ class Agent(Agent):
     def die(self) -> None:
         if not self.shadow:
             self.model.schedule.remove(self)
+            sa = self.get_shadow_agent()
+            sa.die()
         self.decrement_phenotype()
         self.model.grid.remove_agent(self)
         self.site.died += 1
@@ -396,8 +402,10 @@ class Agent(Agent):
         self.start = self.utils
         if self.utils >= 0:
             self.interact()
-        pop_cost = self.model.sites[self.pos].pop_cost * len(self.traits)
-        self.utils -= pop_cost
+        feature_cost = len(self.traits) ** self.model.feature_cost_exp
+        pop_cost = self.model.sites[self.pos].pop_cost
+        cost = feature_cost * pop_cost
+        self.utils -= cost
         if self.utils < 0 or self.random.random() < self.model.mortality:
             self.die()
         else:

@@ -59,41 +59,33 @@ class Shadow(Model):
     def agents(self) -> Iterator['Agent']:
         return self.grid.iter_cell_list_contents([pos for pos in self.sites])
 
-    def step(self):
-        for pos, site in self.sites.items():
-            live_site = self.model.sites[pos]
-            born, died = live_site.born, live_site.died
-            for agent in site.shuffled_sample(born):
-                agent.reproduce()
-            for agent in site.shuffled_sample(died):
-                agent.die()
-
 class World(Model):
 
     def __init__(
         self,
-        feature_interactions: nx.digraph.DiGraph = None,
         init_env_features: int = 5,
         init_agent_features: int = 3,
         max_feature_interactions: int = 5,
-        init_agents: int = 100,
-        base_agent_utils: float = 0.0,
-        base_env_utils: float = 100.0,
-        total_pop_limit = 6000,
-        pop_cost_exp = 2,
-        grid_size: int = 3,
-        repr_multi: int = 1,
-        mortality: float = 0.02,
-        move_chance: float = 0.01,
         trait_mutate_chance: float = 0.01,
         trait_create_chance: float = 0.001,
         feature_mutate_chance: float = 0.001,
         feature_create_chance: float = 0.001,
         feature_gain_chance: float = 0.5,
+        init_agents: int = 100,
+        base_agent_utils: float = 0.0,
+        base_env_utils: float = 100.0,
+        total_pop_limit = 6000,
+        pop_cost_exp = 2,
+        feature_cost_exp = .75,
+        grid_size: int = 3,
+        repr_multi: int = 1,
+        mortality: float = 0.02,
+        move_chance: float = 0.01,
         snap_interval: int = 50,
-        feature_timeout: int = 10,
-        trait_timeout: int = 10,
-        target_sample: int = 1
+        feature_timeout: int = 50,
+        trait_timeout: int = 50,
+        target_sample: int = 1,
+        feature_interactions: nx.digraph.DiGraph = None,
     ) -> None:
         super().__init__()
         self.feature_interactions = feature_interactions
@@ -114,6 +106,7 @@ class World(Model):
         self.feature_gain_chance = feature_gain_chance
         self.site_pop_limit = total_pop_limit / (grid_size ** 2)
         self.pop_cost_exp = pop_cost_exp
+        self.feature_cost_exp = feature_cost_exp
         self.grid = MultiGrid(grid_size, grid_size, True)
         self.schedule = RandomActivation(self)
         self.cached_payoffs = {}
@@ -142,13 +135,15 @@ class World(Model):
         )
         if self.feature_interactions is None:
             self.current_feature_id = 0
+            self.current_interaction_id = 0
             self.feature_interactions = nx.DiGraph()
             for i in range(init_env_features):
                 self.create_feature(env = True)
             for i in range(init_agent_features):
                 self.create_feature()
         else:
-            self.current_feature_id = len(self.feature_interactions.number_of_nodes())
+            self.current_feature_id = self.feature_interactions.number_of_nodes()
+            self.current_interaction_id = self.feature_interactions.size()
         for _, x, y in self.grid.coord_iter():
             pos = (x,y)
             site = Site(model = self, pos = pos)
@@ -294,7 +289,6 @@ class World(Model):
         for site in self.shadow.sites.values():
             site.reset()
         self.schedule.step()
-        self.shadow.step()
         self.verify_shadow()
         self.prune_features()
         print(
