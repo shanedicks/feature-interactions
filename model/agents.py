@@ -4,7 +4,6 @@ from mesa import Agent
 from features import Role
 from output import *
 
-Lfd = Dict["Feature", Dict[str, Union[int, Dict[str, int], Dict[str, float]]]]
 
 class Site:
 
@@ -23,8 +22,6 @@ class Site:
         self.moved_in = 0
         self.moved_out = 0
         self.utils = {}
-        self.fud = {}
-        self.roles_network = nx.DiGraph()
         if traits is None:
             self.traits = {}
             env_features = self.model.get_features_list(env=True)
@@ -33,7 +30,6 @@ class Site:
             for feature in features:
                 self.traits[feature] = self.random.choice(feature.values)
                 self.utils[feature] = self.model.base_env_utils
-            self.roles_network.add_nodes_from(features)
         else:
             self.traits = traits
 
@@ -63,106 +59,6 @@ class Site:
         else:
             agents = self.random.sample(self.agents(), num)
         return agents
-
-    def get_local_features_dict(self):
-        lfd = {}
-        for f in self.model.get_features_list():
-            lfd[f] = {}
-            lfd[f]['traits'] = f.traits_dict[self.pos]
-            total = sum(lfd[f]['traits'].values())
-            lfd[f]['total'] = total
-            if total > 0:
-                lfd[f]['dist'] = {i: c/total for i, c in lfd[f]['traits'].items()}
-            else:
-                lfd[f]['dist'] = {i: 0 for i in lfd[f]['traits']}
-        return lfd
-
-    def env_feature_weight(
-            self,
-            feature: "Feature",
-            lfd: Lfd = None
-        ) -> Union[int, float]:
-        # Get the chance of initiating an interaction against Feature for an agent at a given site
-        if lfd is None:
-            lfd = self.get_local_features_dict()
-        lt = self.traits[feature]
-        edges = feature.in_edges()
-        pop = sum([
-            lfd[f]['total'] for f in lfd.keys()
-            if f in [e.initiator for e in edges]
-        ])
-        avg_impact = 0
-        for edge in edges:
-            weight = lfd[edge.initiator]['total'] / pop if pop > 0 else 0
-            dist = lfd[edge.initiator]['dist']
-            avg_impact += weight * sum([edge.payoffs[i][lt][1]*dist[i] for i in dist])
-        if avg_impact >= 0:
-            return 1
-        else:
-            num_ints = self.utils[feature]/-avg_impact
-            return min([num_ints/pop, 1])
-
-    def agent_feature_eu_dict(
-            self,
-            feature
-        ) -> Dict[str, float]:
-        # Get the expected utility for each trait of Feature for an Agent at a given site
-        lfd = self.get_local_features_dict()
-        pop = len(self.agents())
-        in_edges = feature.in_edges()
-        out_edges = feature.out_edges()
-        scores = {}
-        for v in feature.values:
-            eu = 0
-            for edge in in_edges:
-                weight = lfd[edge.initiator]['total'] / pop if pop > 0 else 0
-                dist = lfd[edge.initiator]['dist']
-                eu += weight * sum([edge.payoffs[i][v][1]*dist[i] for i in dist])
-            for edge in out_edges:
-                if edge.target in self.traits.keys():
-                    weight = self.env_feature_weight(edge.target, lfd)
-                    eu += weight * edge.payoffs[v][self.traits[edge.target]][0]
-                elif edge.target.env:
-                    continue
-                else:
-                    weight = lfd[edge.target]['total'] / pop if pop > 0 else 0
-                    dist = lfd[edge.target]['dist']
-                    eu += weight * sum([edge.payoffs[v][i][0]*dist[i] for i in dist])
-            scores[v] = eu
-        return scores
-
-    def get_feature_utility_dict(self) -> Dict["Feature", float]:
-        fud = {}
-        pop = len(self.agents())
-        for f in self.model.get_features_list():
-            scores = self.agent_feature_eu_dict(f)
-            fud[f] = scores
-        return fud
-
-    def update_role_network(self):
-        rn = self.roles_network
-        role_nodes = [n for n in rn.nodes() if type(n) is Role]
-        occ_roles = self.model.site_roles_dict[self.pos]['occupied']
-        nodes_to_remove = [n for n in role_nodes if n not in occ_roles]
-        rn.remove_nodes_from(nodes_to_remove)
-        nodes_to_add = [n for n in occ_roles if n not in role_nodes]
-        rn.add_nodes_from(nodes_to_add)
-        role_nodes.extend(nodes_to_add)
-        for role in nodes_to_add:
-            env_targets = [
-                i.target for i in role.interactions['initiator'] 
-                if i.target.env == True and i.target in self.traits.keys()
-            ]
-            rn.add_edges_from([(role, target) for target in env_targets])
-            role_targets = [
-                target for target in role_nodes
-                if any(
-                    f in target.features for f in [
-                        i.target for i in role.interactions['initiator']
-                    ]
-                )
-            ]
-            rn.add_edges_from([(role, target) for target in role_targets])
 
     def __repr__(self) -> str:
         return "Site {0}".format(self.pos)
@@ -330,7 +226,7 @@ class Agent(Agent):
                 ]
                 if self.random.random() <= self.model.trait_create_chance \
                 and not self.shadow:
-                    child_traits[feature] = feature.create_trait()
+                    child_traits[feature] = feature.next_trait()
                 else:
                     try:
                         child_traits[feature] = self.random.choice(new_traits)
@@ -339,7 +235,7 @@ class Agent(Agent):
         if self.random.random() <= self.model.feature_mutate_chance:
             if self.random.random() <= self.model.feature_create_chance \
             and not self.shadow:
-                feature = self.model.create_feature()
+                feature = self.model.next_feature()
                 child_traits[feature] = self.random.choice(feature.values)
             else: 
                 features = [

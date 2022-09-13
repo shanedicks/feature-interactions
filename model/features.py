@@ -1,4 +1,5 @@
 from typing import Dict, List, Tuple, FrozenSet
+from itertools import product
 
 Payoff = Tuple[float, float]
 PayoffDict = Dict[str, Dict[str, Payoff]]
@@ -25,25 +26,34 @@ class Feature:
         feature_id: int,
         env: bool,
         num_values: int = 5,
+        db_id: int = None
     ) -> None:
-        self.id = feature_id
-        self.next_value_id = 0
+        self.feature_id = feature_id
+        self.current_value_id = 0
+        self.current_value_db_id = 0
         self.model = model
         self.name = name_from_number(feature_id, lower=False)
         self.env = env
+        self.db_id = db_id
+        if self.db_id is None:
+            env = 1 if self.env else 0
+            row = (self.model.network_id, self.name, env)
+            self.db_id = self.model.db.write_row('features', row)
+            self.model.current_feature_db_id = self.db_id
         self.empty_steps = 0
         self.empty_traits = {}
+        self.trait_ids = {}
         self.values = []
         for i in range(num_values):
-            self.values.append(self.new_value())
+            self.next_trait()
         self.traits_dict = {
             (x, y): {
             } for _, x, y in self.model.grid.coord_iter()
         }
 
     def new_value(self):
-        self.next_value_id += 1
-        return name_from_number(self.next_value_id)
+        self.current_value_id += 1
+        return name_from_number(self.current_value_id)
 
     def in_edges(self) -> List['Interaction']:
         fi = self.model.feature_interactions
@@ -53,24 +63,66 @@ class Feature:
         fi = self.model.feature_interactions
         return [x[2] for x in fi.edges(nbunch=self, data='interaction')]
 
-    def create_trait(self) -> str:
+    def next_trait(self) -> str:
         value = self.new_value()
         self.values.append(value)
-        initated = self.out_edges()
-        targeted = self.in_edges()
-        for i in initated:
-            i.payoffs[value] = {}
-            for t_value in i.target.values:
-                i.payoffs[value][t_value] = i.new_payoff(value, t_value)
-        for t in targeted:
-            for i_value in t.initiator.values:
-                t.payoffs[i_value][value] = t.new_payoff(i_value, value)
-        print("New trait {0} added to feature {1}".format(value, self))
+        restored = self.model.db.get_next_trait(
+            self.db_id,
+            value,
+        )
+        if restored:
+            self.trait_ids[value] = restored['trait_id']
+            print("restored trait {0} to feature {1}".format(value, self))
+        else:
+            row = (value, self.db_id)
+            self.trait_ids[value] = self.model.db.write_row('traits', row)
+            print("New trait {0} added to feature {1}".format(value, self))
+        if self in self.model.feature_interactions.nodes():
+            self.new_payoffs = {'payoffs': []}
+            self.set_payoffs(value)
+            if len(self.new_payoffs['payoffs']) > 0:
+                self.model.db.write_rows(self.new_payoffs)
+            del self.new_payoffs
+        trait_changes_row = (
+            self.model.spacetime_dict["world"],
+            self.trait_ids[value],
+            "added"
+        )
+        self.model.db.write_row('trait_changes', trait_changes_row)
         return value
 
-    def remove_trait(self, value: str):
+    def set_payoffs(self, value: str) -> None:
+        initated = self.out_edges()
+        targeted = self.in_edges()
+        rows_list = []
+        for i in initated:
+            i.payoffs[value] = {}
+            i_d, t_d = i.initiator.trait_ids, i.target.trait_ids
+            for t_value in i.target.values:
+                np, new = i.next_payoff(value, t_value)
+                i.payoffs[value][t_value] = np
+                row = (i.db_id, i_d[value], t_d[t_value], np[0], np[1])
+                if new:
+                    rows_list.append(row)
+        for t in targeted:
+            i_d, t_d = t.initiator.trait_ids, t.target.trait_ids
+            for i_value in t.initiator.values:
+                np, new = t.next_payoff(i_value, value)
+                t.payoffs[i_value][value] = np
+                row = (t.db_id, i_d[i_value], t_d[value], np[0], np[1])
+                if new:
+                    rows_list.append(row)
+        self.new_payoffs['payoffs'].extend(rows_list)
+
+    def remove_trait(self, value: str) -> None:
         initiated = self.out_edges()
         targeted = self.in_edges()
+        trait_changes_row = (
+            self.model.spacetime_dict["world"],
+            self.trait_ids[value],
+            "removed"
+        )
+        self.model.db.write_row('trait_changes', trait_changes_row)
         for i in initiated:
             del i.payoffs[value]
         for t in targeted:
@@ -81,12 +133,13 @@ class Feature:
                     print(e)
         self.values.remove(value)
         del self.empty_traits[value]
+        del self.trait_ids[value]
         for s in self.model.sites:
             if value in self.traits_dict[s]:
                 del self.traits_dict[s][value]
         print("Trait {0} removed from feature {1}".format(value, self))
 
-    def check_empty(self):
+    def check_empty(self) -> None:
         sd = self.model.sites
         if sum([v for s in sd for v in self.traits_dict[s].values()]) == 0:
             self.empty_steps += 1
@@ -102,7 +155,7 @@ class Feature:
             else:
                 self.empty_traits[v] = 0
 
-    def prune_traits(self):
+    def prune_traits(self) -> None:
         prunable = [
             t for t,c in self.empty_traits.items()
             if c >= self.model.trait_timeout
@@ -121,40 +174,89 @@ class Interaction:
         model: "World",
         initiator: Feature,
         target: Feature,
-        trait_payoff_mod: float = 0.5,
-        payoffs: PayoffDict = None
+        db_id: int = None,
+        restored: bool = False,
+        payoffs: PayoffDict = None,
+        anchors = None,
     ) -> None:
         self.model = model
         self.random = model.random
         self.initiator = initiator
         self.target = target
-        self.trait_payoff_mod = trait_payoff_mod
-        self.anchors = self.set_anchors()
-        assert trait_payoff_mod <= 1.0
-        if payoffs is None:
+        self.anchors = self.set_anchors() if anchors is None else anchors
+        self.db_id = db_id
+        if self.db_id is None:
+            row = (
+                self.model.network_id,
+                self.initiator.db_id,
+                self.target.db_id,
+                self.anchors["i"],
+                self.anchors["t"]
+            )
+            self.db_id = self.model.db.write_row('interactions', row)
+        if payoffs is None and restored is False:
             self.payoffs = self.construct_payoffs()
+        elif restored is True:
+            self.payoffs = self.restore_payoffs()
         else:
             self.payoffs = payoffs
 
     def set_anchors(self):
-        anchor = 1 - self.trait_payoff_mod
-        i_anchor = round(self.random.uniform(-anchor, anchor), 2)
-        t_anchor = round(self.random.uniform(-anchor, anchor), 2)
+        anchor = 1 - self.model.trait_payoff_mod
+        mode = self.model.anchor_bias * anchor
+        i_anchor = round(self.random.triangular(-anchor, anchor, mode), 2)
+        t_anchor = round(self.random.triangular(-anchor, anchor, mode), 2)
         return {"i": i_anchor, "t": t_anchor}
 
     def construct_payoffs(self) -> PayoffDict:
-        payoffs = {}
+        payoff_dict = {i: {} for i in self.initiator.values}
+        row_dict = {'payoffs': []}
+        i_d, t_d = self.initiator.trait_ids, self.target.trait_ids
         for i_value in self.initiator.values:
-            payoffs[i_value] = {}
             for t_value in self.target.values:
-                payoffs[i_value][t_value] = self.new_payoff(i_value, t_value)
-        return payoffs
+                np = self.new_payoff()
+                payoff_dict[i_value][t_value] = np
+                row = (self.db_id, i_d[i_value], t_d[t_value], np[0], np[1])
+                row_dict['payoffs'].append(row)
+        self.model.db.write_rows(row_dict)
+        return payoff_dict
 
-    def new_payoff(self, i_value, t_value):
-        mod = self.trait_payoff_mod
-        i = round(self.anchors["i"] + self.random.uniform(-mod, mod), 2)
+    def restore_payoffs(self) -> PayoffDict:
+        payoff_dict = {i: {} for i in self.initiator.values}
+        payoff_set = set(product(self.initiator.values, self.target.values))
+        restored = self.model.db.get_interaction_payoffs(
+            self.db_id,
+            self.initiator.values,
+            self.target.values
+        )
+        for p in restored:
+            payoff_dict[p['initiator']][p['target']] = (p['i_utils'], p['t_utils'])
+            payoff_set.remove((p['initiator'], p['target']))
+        row_dict = {'payoffs': []}
+        if len(payoff_set) > 0:
+            i_d, t_d = self.initiator.trait_ids, self.target.trait_ids
+            for i_value, t_value in payoff_set:
+                np = self.new_payoff()
+                payoff_dict[i_value][t_value] = np
+                row = (self.db_id, i_d[i_value], t_d[t_value], np[0], np[1])
+                row_dict['payoffs'].append(row)
+            self.model.db.write_rows(row_dict)
+        return payoff_dict
+
+    def next_payoff(self, i_value, t_value) -> Tuple[Payoff, bool]:
+        restored = self.model.db.get_next_payoff(self.db_id, i_value, t_value)
+        if restored:
+            payoff = ((restored['initiator_utils'], restored['target_utils']), False)
+        else:
+            payoff = (self.new_payoff(), True)
+        return payoff
+
+    def new_payoff(self) -> Payoff:
+        mod = self.model.trait_payoff_mod
+        mode = self.model.payoff_bias * mod
+        i = round(self.anchors["i"] + self.random.triangular(-mod, mod, mode), 2)
         assert i <= 1.0 and i >= -1.0
-        t = round(self.anchors["t"] + self.random.uniform(-mod, mod), 2)
+        t = round(self.anchors["t"] + self.random.triangular(-mod, mod, mode), 2)
         assert t <= 1.0 and t >= -1.0
         return (i, t)
 

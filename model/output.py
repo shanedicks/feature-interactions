@@ -6,7 +6,7 @@ from collections import Counter
 from itertools import chain, combinations
 from math import comb
 from statistics import mean, median, quantiles
-from typing import Dict, List, Set, Tuple, Iterator
+from typing import Any, Dict, List, Set, Tuple, Iterator
 
 
 
@@ -48,36 +48,65 @@ def get_total_died(world: "World") -> int:
 def get_total_moved(world: "World") -> int:
     return sum([site.moved_in for site in world.sites.values()])
 
+def get_model_vars_row(
+        world: "World",
+        db: "Manager",
+        sd: Dict[Tuple[int, int], int],
+        rd: Dict[str, List[Dict[str, Any]]]
+    ):
+    spacetime_id = sd["world"]
+    row = (
+        spacetime_id,
+        get_population(world),
+        get_total_utility(world),
+        get_mean_utility(world),
+        get_median_utility(world),
+        get_num_phenotypes(world),
+        get_num_roles(world),
+        get_num_agent_features(world)
+    )
+    rd['model_vars'] = [row]
 
-def write_phenotypes_rows(
+def get_phenotypes_rows(
         model: "Model",
-        step: int,
-        dc: "datacollector",
+        db: "Manager",
+        sd: Dict[Tuple[int, int], int],
+        rd: Dict[str, List[Dict[str, Any]]],
         shadow: bool = False,
     ) -> None:
-    keys = ['Step', 'Site', 'Shadow', 'Phenotype', 'Pop']
+    rd['phenotypes'] = []
     for site in model.sites:
+        spacetime_id = sd[site]
         phenotypes = phenotype_dist(model, site)
         for phenotype, pop in phenotypes.items():
-            values = [step, site, shadow, phenotype, pop]
-            dc.add_table_row('Phenotypes', {k:v for k,v in zip(keys, values)})
+            row = (spacetime_id, shadow, phenotype, pop)
+            rd['phenotypes'].append(row)
 
-def write_sites_rows(
+def get_sites_rows(
         world: "World",
-        step: int,
-        dc = "datacollector"
+        db: "Manager",
+        sd: Dict[Tuple[int, int], int],
+        rd: Dict[str, List[Tuple[Any]]]
     ) -> None:
-    keys = ['Step', 'Site', 'Born', 'Died', 'Moved In', 'Moved Out']
+    rd['demographics'] = []
+    rd['environment'] = []
     for pos, site in world.sites.items():
-        values = [step, pos, site.born, site.died, site.moved_in, site.moved_out]
-        dc.add_table_row('Sites', {k:v for k,v in zip(keys, values)})
+        st_id = sd[pos]
+        row = (st_id, site.get_pop(), site.born, site.died, site.moved_in, site.moved_out)
+        rd['demographics'].append(row)
+        for k, v in site.utils.items():
+            row = (st_id, k.trait_ids[site.traits[k]], round(v, 2))
+            rd['environment'].append(row)
 
 def tables_update(world: "World") -> None:
-    dc = world.datacollector
-    step = world.schedule.time
-    write_phenotypes_rows(world, step, dc)
-    write_phenotypes_rows(world.shadow, step, dc, True)
-    write_sites_rows(world, step, dc)
+    db = world.db
+    sd = world.spacetime_dict
+    rd = {}
+    get_model_vars_row(world, db, sd, rd)
+    get_phenotypes_rows(world, db, sd, rd)
+    get_phenotypes_rows(world.shadow, db, sd, rd, True)
+    get_sites_rows(world, db, sd, rd)
+    db.write_rows(rd)
 
 
 # Role Evaluation
@@ -367,3 +396,106 @@ def occupied_phenotypes_list(model: "Model"):
     sd = model.sites
     types = {p for r in rd for s in sd for p, n in r.types[s].items() if n > 0}
     return list(types)
+
+
+# Previously Site methods - need reworking to handle input from Phenotypes db
+
+    def get_local_features_dict(self):
+        lfd = {}
+        for f in self.model.get_features_list():
+            lfd[f] = {}
+            lfd[f]['traits'] = f.traits_dict[self.pos]
+            total = sum(lfd[f]['traits'].values())
+            lfd[f]['total'] = total
+            if total > 0:
+                lfd[f]['dist'] = {i: c/total for i, c in lfd[f]['traits'].items()}
+            else:
+                lfd[f]['dist'] = {i: 0 for i in lfd[f]['traits']}
+        return lfd
+
+    def env_feature_weight(
+            self,
+            feature: "Feature",
+            lfd: Lfd = None
+        ) -> Union[int, float]:
+        # Get the chance of initiating an interaction against Feature for an agent at a given site
+        if lfd is None:
+            lfd = self.get_local_features_dict()
+        lt = self.traits[feature]
+        edges = feature.in_edges()
+        pop = sum([
+            lfd[f]['total'] for f in lfd.keys()
+            if f in [e.initiator for e in edges]
+        ])
+        avg_impact = 0
+        for edge in edges:
+            weight = lfd[edge.initiator]['total'] / pop if pop > 0 else 0
+            dist = lfd[edge.initiator]['dist']
+            avg_impact += weight * sum([edge.payoffs[i][lt][1]*dist[i] for i in dist])
+        if avg_impact >= 0:
+            return 1
+        else:
+            num_ints = self.utils[feature]/-avg_impact
+            return min([num_ints/pop, 1])
+
+    def agent_feature_eu_dict(
+            self,
+            feature
+        ) -> Dict[str, float]:
+        # Get the expected utility for each trait of Feature for an Agent at a given site
+        lfd = self.get_local_features_dict()
+        pop = len(self.agents())
+        in_edges = feature.in_edges()
+        out_edges = feature.out_edges()
+        scores = {}
+        for v in feature.values:
+            eu = 0
+            for edge in in_edges:
+                weight = lfd[edge.initiator]['total'] / pop if pop > 0 else 0
+                dist = lfd[edge.initiator]['dist']
+                eu += weight * sum([edge.payoffs[i][v][1]*dist[i] for i in dist])
+            for edge in out_edges:
+                if edge.target in self.traits.keys():
+                    weight = self.env_feature_weight(edge.target, lfd)
+                    eu += weight * edge.payoffs[v][self.traits[edge.target]][0]
+                elif edge.target.env:
+                    continue
+                else:
+                    weight = lfd[edge.target]['total'] / pop if pop > 0 else 0
+                    dist = lfd[edge.target]['dist']
+                    eu += weight * sum([edge.payoffs[v][i][0]*dist[i] for i in dist])
+            scores[v] = eu
+        return scores
+
+    def get_feature_utility_dict(self) -> Dict["Feature", float]:
+        fud = {}
+        pop = len(self.agents())
+        for f in self.model.get_features_list():
+            scores = self.agent_feature_eu_dict(f)
+            fud[f] = scores
+        return fud
+
+    def update_role_network(self):
+        rn = self.roles_network
+        role_nodes = [n for n in rn.nodes() if type(n) is Role]
+        occ_roles = self.model.site_roles_dict[self.pos]['occupied']
+        nodes_to_remove = [n for n in role_nodes if n not in occ_roles]
+        rn.remove_nodes_from(nodes_to_remove)
+        nodes_to_add = [n for n in occ_roles if n not in role_nodes]
+        rn.add_nodes_from(nodes_to_add)
+        role_nodes.extend(nodes_to_add)
+        for role in nodes_to_add:
+            env_targets = [
+                i.target for i in role.interactions['initiator'] 
+                if i.target.env == True and i.target in self.traits.keys()
+            ]
+            rn.add_edges_from([(role, target) for target in env_targets])
+            role_targets = [
+                target for target in role_nodes
+                if any(
+                    f in target.features for f in [
+                        i.target for i in role.interactions['initiator']
+                    ]
+                )
+            ]
+            rn.add_edges_from([(role, target) for target in role_targets])
