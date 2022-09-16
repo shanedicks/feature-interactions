@@ -243,24 +243,6 @@ class Manager():
         """.format(", ".join(keys), feature_id, str(trait_name))
         return self.get_next_record(sql, keys)
 
-    def get_next_payoff(
-        self,
-        interaction_id,
-        i_name,
-        t_name
-    ) -> Union[Dict[str, Any], None]:
-        keys = ["initiator_utils", "target_utils"]
-        sql = """
-            SELECT {0}
-            FROM payoffs
-            LEFT JOIN traits AS i on initiator = i.trait_id
-            LEFT JOIN traits AS t ON target = t.trait_id
-            WHERE payoffs.interaction_id = {1}
-            AND i.name = '{2}'
-            AND t.name = '{3}'
-        """.format(", ".join(keys), interaction_id, i_name, t_name)
-        return self.get_next_record(sql, keys)
-
     def get_records(self, sql: str, keys: List[str]) -> List[Dict[str, Any]]:
         conn = sqlite3.connect(self.db_string)
         records = conn.execute(sql).fetchall()

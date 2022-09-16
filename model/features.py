@@ -95,22 +95,43 @@ class Feature:
         initated = self.out_edges()
         targeted = self.in_edges()
         rows_list = []
+        new_payoffs = set()
         for i in initated:
             i.payoffs[value] = {}
+            target_values = set(i.target.values)
+            restored = self.model.db.get_interaction_payoffs(
+                i.db_id,
+                value,
+                i.target.values
+            )
+            for p in restored:
+                i.payoffs[value][p['target']] = (p['i_utils'], p['t_utils'])
+                target_values.remove(p['target'])
             i_d, t_d = i.initiator.trait_ids, i.target.trait_ids
-            for t_value in i.target.values:
-                np, new = i.next_payoff(value, t_value)
-                i.payoffs[value][t_value] = np
-                row = (i.db_id, i_d[value], t_d[t_value], np[0], np[1])
-                if new:
+            for t_value in target_values:
+                if (i_d[value], t_d[t_value]) not in new_payoffs:
+                    new_payoffs.add((i_d[value], t_d[t_value]))
+                    np = i.new_payoff()
+                    i.payoffs[value][t_value] = np
+                    row = (i.db_id, i_d[value], t_d[t_value], np[0], np[1])
                     rows_list.append(row)
         for t in targeted:
+            initiator_values = set(t.initiator.values)
+            restored = self.model.db.get_interaction_payoffs(
+                t.db_id,
+                t.initiator.values,
+                value
+            )
+            for p in restored:
+                t.payoffs[p['initiator']][value] = (p['i_utils'], p['t_utils'])
+                initiator_values.remove(p['initiator'])
             i_d, t_d = t.initiator.trait_ids, t.target.trait_ids
-            for i_value in t.initiator.values:
-                np, new = t.next_payoff(i_value, value)
-                t.payoffs[i_value][value] = np
-                row = (t.db_id, i_d[i_value], t_d[value], np[0], np[1])
-                if new:
+            for i_value in initiator_values:
+                if (i_d[i_value], t_d[value]) not in new_payoffs:
+                    new_payoffs.add((i_d[i_value], t_d[value]))
+                    np = t.new_payoff()
+                    t.payoffs[i_value][value] = np
+                    row = (t.db_id, i_d[i_value], t_d[value], np[0], np[1])
                     rows_list.append(row)
         self.new_payoffs['payoffs'].extend(rows_list)
 
@@ -242,14 +263,6 @@ class Interaction:
                 row_dict['payoffs'].append(row)
             self.model.db.write_rows(row_dict)
         return payoff_dict
-
-    def next_payoff(self, i_value, t_value) -> Tuple[Payoff, bool]:
-        restored = self.model.db.get_next_payoff(self.db_id, i_value, t_value)
-        if restored:
-            payoff = ((restored['initiator_utils'], restored['target_utils']), False)
-        else:
-            payoff = (self.new_payoff(), True)
-        return payoff
 
     def new_payoff(self) -> Payoff:
         mod = self.model.trait_payoff_mod

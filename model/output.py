@@ -81,6 +81,8 @@ def get_phenotypes_rows(
         for phenotype, pop in phenotypes.items():
             row = (spacetime_id, shadow, phenotype, pop)
             rd['phenotypes'].append(row)
+    if len(rd['phenotypes']) == 0:
+        del rd['phenotypes']
 
 def get_sites_rows(
         world: "World",

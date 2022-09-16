@@ -110,7 +110,7 @@ class Controller():
                             world_params['move_chance'],
                             world_params['snap_interval'],
                             world_params['target_sample'],
-                            network_id                                
+                            network_id
                         )
                         world_id = self.db_manager.write_row("worlds", world_row)
                         world = World(self, world_id, network_id,**network_params, **world_params)

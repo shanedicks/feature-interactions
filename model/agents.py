@@ -308,7 +308,7 @@ class Agent(Agent):
             self.age += 1
             if self.utils > len(self.traits) * self.model.repr_multi:
                 self.reproduce()
-            if self.start == self.utils - pop_cost \
+            if self.start == self.utils - cost \
             or self.random.random() < self.model.move_chance:
                 self.move()
 
