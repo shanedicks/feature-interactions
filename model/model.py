@@ -1,5 +1,6 @@
 import itertools
 from datetime import datetime
+from functools import reduce
 from typing import Any, Dict, Iterable, Iterator, List, Mapping, Tuple, Type, Union
 from mesa import Model
 from mesa.datacollection import DataCollector
@@ -18,8 +19,6 @@ class Controller():
         experiment_name: str,
     ) -> None:
         self.experiment_name = experiment_name
-        self.db_name = self.get_db_name()
-        self.db_manager = self.get_db_manager()
         self.default_network_params = {
             "init_env_features": 5,
             "init_agent_features": 3,
@@ -34,9 +33,9 @@ class Controller():
             "feature_mutate_chance": 0.001,
             "feature_create_chance": 0.001,
             "feature_gain_chance": 0.5,
-            "feature_timeout":  50,
-            "trait_timeout":  50,
-            "init_agents":  100,
+            "feature_timeout":  100,
+            "trait_timeout":  100,
+            "init_agents":  900,
             "base_agent_utils": 0.0,
             "base_env_utils": 100.0,
             "total_pop_limit": 6000,
@@ -44,9 +43,9 @@ class Controller():
             "feature_cost_exp": .75,
             "grid_size":  3,
             "repr_multi":  1,
-            "mortality": 0.02,
+            "mortality": 0.01,
             "move_chance": 0.01,
-            "snap_interval": 50,
+            "snap_interval": 500,
             "target_sample": 1,
         }
 
@@ -69,12 +68,26 @@ class Controller():
         network_params_dict: Mapping[str, Union[Any, Iterable[Any]]] = None,
         world_params_dict: Mapping[str, Union[Any, Iterable[Any]]] = None,
     ) -> None:
+        self.db_name = self.get_db_name()
+        self.db_manager = self.get_db_manager()
         self.db_manager.initialize_db()
         if network_params_dict is None:
             network_params_dict = self.default_network_params
         if world_params_dict is None:
             world_params_dict = self.default_world_params
+        self.total_networks = num_networks * reduce(
+            lambda x, y: x * y,
+            [len(v) for v in network_params_dict.values() if isinstance(v, list)],
+            1
+        )
+        self.network_worlds = num_iterations * reduce(
+            lambda x, y: x * y,
+            [len(v) for v in world_params_dict.values() if isinstance(v, list)],
+            1
+        )
+        self.max_steps = max_steps
         network_paramset = self.param_set_generator(network_params_dict)
+        self.network_num = 0
         for network_params in network_paramset:
             network_row = (
                 network_params['init_env_features'],
@@ -85,10 +98,13 @@ class Controller():
                 network_params['payoff_bias']
             )
             for network in range(num_networks):
+                self.network_num += 1
+                self.world_num = 0
                 network_id = self.db_manager.write_row('networks', network_row)
                 world_param_set = self.param_set_generator(world_params_dict)
                 for world_params in world_param_set:
                     for i in range(num_iterations):
+                        self.world_num += 1
                         self.last_feature_id, self.last_trait_id = 0, 0
                         world_row = (
                             world_params['trait_mutate_chance'],
@@ -502,19 +518,16 @@ class World(Model):
         self.verify_shadow()
         self.prune_features()
         print(
-            "Step{0}: {1} agents, {2} roles, {3} types, "
-            "{6} features | {4} new and {5} cached interactions".format(
+            "N:{2}/{3}, W:{4}/{5}, Step:{0}/{1}".format(
                 self.schedule.time,
-                self.schedule.get_agent_count(),
-                len(set(occupied_roles_list(self))),
-                len(set(occupied_phenotypes_list(self))),
-                self.new,
-                self.cached,
-                get_num_agent_features(self)
+                self.controller.max_steps,
+                self.controller.network_num,
+                self.controller.total_networks,
+                self.controller.world_num,
+                self.controller.network_worlds
             )
         )
         tables_update(self)
-        env_report(self)
         print(role_dist(self))
         if self.schedule.get_agent_count == 0:
             self.running = False

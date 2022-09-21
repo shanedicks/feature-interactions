@@ -333,10 +333,12 @@ def role_dist(model: "Model", site: Tuple[int, int] = None) -> Dict['Role', int]
     if site is None:
         sd = model.sites
         for r in model.roles_dict.values():
-            d[r] = sum([v for s in sd for v in r.types[s].values()])
+            type_dist = [v for s in sd for v in r.types[s].values()]
+            d[r] = (len(type_dist), sum(type_dist))
     else:
         for r in model.roles_dict.values():
-            d[r] = sum([v for v in r.types[site].values()])
+            type_dist = [v for v in r.types[site].values()]
+            d[r] = (len(type_dist), sum(type_dist))
     return {role: count for role, count in d.items() if count > 0}
 
 def phenotype_dist(model: "Model", site: Tuple[int, int] = None) -> Dict[str, int]:
