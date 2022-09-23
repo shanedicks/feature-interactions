@@ -273,8 +273,8 @@ class Manager():
     def get_interaction_payoffs(
         self,
         interaction_id: int,
-        i_traits: Tuple[str],
-        t_traits: Tuple[str]
+        i_traits: List[str],
+        t_traits: List[str]
     ) -> List[Dict[str, Any]]:
         sql = """
             SELECT i.name,

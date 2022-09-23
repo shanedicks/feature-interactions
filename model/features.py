@@ -101,11 +101,11 @@ class Feature:
             target_values = set(i.target.values)
             restored = self.model.db.get_interaction_payoffs(
                 i.db_id,
-                value,
+                [value],
                 i.target.values
             )
             for p in restored:
-                i.payoffs[value][p['target']] = (p['i_utils'], p['t_utils'])
+                i.payoffs[p['initiator']][p['target']] = (p['i_utils'], p['t_utils'])
                 target_values.remove(p['target'])
             i_d, t_d = i.initiator.trait_ids, i.target.trait_ids
             for t_value in target_values:
@@ -120,10 +120,10 @@ class Feature:
             restored = self.model.db.get_interaction_payoffs(
                 t.db_id,
                 t.initiator.values,
-                value
+                [value]
             )
             for p in restored:
-                t.payoffs[p['initiator']][value] = (p['i_utils'], p['t_utils'])
+                t.payoffs[p['initiator']][p['target']] = (p['i_utils'], p['t_utils'])
                 initiator_values.remove(p['initiator'])
             i_d, t_d = t.initiator.trait_ids, t.target.trait_ids
             for i_value in initiator_values:

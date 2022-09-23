@@ -4,7 +4,7 @@ import pandas as pd
 import random
 from collections import Counter
 from itertools import chain, combinations
-from math import comb
+from math import comb, log2
 from statistics import mean, median, quantiles
 from typing import Any, Dict, List, Set, Tuple, Iterator
 
@@ -333,13 +333,21 @@ def role_dist(model: "Model", site: Tuple[int, int] = None) -> Dict['Role', int]
     if site is None:
         sd = model.sites
         for r in model.roles_dict.values():
-            type_dist = [v for s in sd for v in r.types[s].values()]
-            d[r] = (len(type_dist), sum(type_dist))
+            type_dist = [v for s in sd for v in r.types[s].values() if v > 0]
+            total = sum(type_dist)
+            shannon = round(-sum([(v/total)*log2(v/total) for v in type_dist]), 2)
+            d[r] = (shannon, len(set(type_dist)), total)
     else:
         for r in model.roles_dict.values():
-            type_dist = [v for v in r.types[site].values()]
-            d[r] = (len(type_dist), sum(type_dist))
-    return {role: count for role, count in d.items() if count > 0}
+            type_dist = [v for v in r.types[site].values() if v > 0]
+            total = sum(type_dist)
+            shannon = round(sum([(v/total)*log2(v/total) for v in type_dist]),2)
+            d[r] = (shannon, len(type_dist), total)
+    return sorted(
+            ["{0}:{1}".format(role, desc) for role, desc in d.items() if desc[2] > 0], 
+            key=lambda x: x[1],
+            reverse=True
+        )
 
 def phenotype_dist(model: "Model", site: Tuple[int, int] = None) -> Dict[str, int]:
     rd = model.roles_dict.values()
