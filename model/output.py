@@ -344,8 +344,8 @@ def role_dist(model: "Model", site: Tuple[int, int] = None) -> Dict['Role', int]
             shannon = round(sum([(v/total)*log2(v/total) for v in type_dist]),2)
             d[r] = (shannon, len(type_dist), total)
     return sorted(
-            ["{0}:{1}".format(role, desc) for role, desc in d.items() if desc[2] > 0], 
-            key=lambda x: x[1],
+            [[role, desc] for role, desc in d.items() if desc[2] > 0], 
+            key=lambda x: x[1][2],
             reverse=True
         )
 
