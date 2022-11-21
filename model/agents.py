@@ -41,7 +41,10 @@ class Site:
 
     def get_pop_cost(self) -> float:
         m = self.model
-        return float((self.get_pop() / m.site_pop_limit) ** m.pop_cost_exp)
+        if m.site_pop_limit > 0:
+            return float((self.get_pop() / m.site_pop_limit) ** m.pop_cost_exp)
+        else:
+            return 0
 
     def reset(self):
         self.born = 0
