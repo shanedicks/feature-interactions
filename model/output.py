@@ -74,7 +74,8 @@ def get_phenotypes_rows(
         rd: Dict[str, List[Dict[str, Any]]],
         shadow: bool = False,
     ) -> None:
-    rd['phenotypes'] = []
+    if 'phenotypes' not in rd:
+        rd['phenotypes'] = []
     for site in model.sites:
         spacetime_id = sd[site]
         phenotypes = phenotype_dist(model, site)
