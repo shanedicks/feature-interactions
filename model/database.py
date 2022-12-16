@@ -12,14 +12,18 @@ class Manager():
         self.db_name = db_name
         self.db_string = "{0}/{1}".format(path_to_db, db_name)
 
+    def get_connection(self):
+        conn = sqlite3.connect(self.db_string, timeout=10)
+        return conn
+
     def inspect_db(self) -> sqlite3.Cursor:
-        conn = sqlite3.connect(self.db_string)
+        conn = self.get_connection()
         c = conn.cursor()
         results = c.execute("SELECT * FROM sqlite_master")
         return results
 
     def initialize_db(self) -> None:
-        conn = sqlite3.connect(self.db_string)
+        conn = self.get_connection()
         conn.execute("PRAGMA foreign_keys = ON")
 
         networks_table = """
@@ -186,7 +190,7 @@ class Manager():
     def write_row(self, table_name: str, values_tuple: Tuple[Any]) -> int:
         sql_params = ",".join(['?'] * len(values_tuple))
         sql = "INSERT INTO {0} VALUES (Null, {1})".format(table_name, sql_params)
-        conn = sqlite3.connect(self.db_string)
+        conn = self.get_connection()
         c = conn.cursor()
         c.execute(sql, values_tuple)
         row_id = c.lastrowid
@@ -195,7 +199,7 @@ class Manager():
         return row_id
 
     def write_rows(self, rows_dict: Dict[str, List[Tuple[Any]]]) -> None:
-        conn = sqlite3.connect(self.db_string)
+        conn = self.get_connection()
         for table_name, rows_list in rows_dict.items():
             sql_params = ",".join(['?'] * len(rows_list[0]))
             sql = "INSERT INTO {0} VALUES (Null, {1})".format(table_name, sql_params)
@@ -204,11 +208,11 @@ class Manager():
         conn.close()
 
     def get_next_record(self, sql: str, keys: List[str]) -> Union[Dict[str, Any], None]:
-        conn = sqlite3.connect(self.db_string)
+        conn = self.get_connection()
         record = conn.execute(sql).fetchone()
+        conn.close()
         if record:
             record = dict(zip(keys, record))
-        conn.close()
         return record
 
     def get_next_feature(
@@ -244,7 +248,7 @@ class Manager():
         return self.get_next_record(sql, keys)
 
     def get_records(self, sql: str, keys: List[str]) -> List[Dict[str, Any]]:
-        conn = sqlite3.connect(self.db_string)
+        conn = self.get_connection()
         records = conn.execute(sql).fetchall()
         conn.close()
         return [dict(zip(keys, record)) for record in records]
