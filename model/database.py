@@ -1,4 +1,5 @@
 import sqlite3
+import pandas as pd
 from typing import Any, Dict, List, Tuple, Union
 
 class Manager():
@@ -10,7 +11,7 @@ class Manager():
     ) -> None:
         self.path_to_db = path_to_db
         self.db_name = db_name
-        self.db_string = "{0}/{1}".format(path_to_db, db_name)
+        self.db_string = f"{path_to_db}/{db_name}"
 
     def get_connection(self):
         conn = sqlite3.connect(self.db_string, timeout=10)
@@ -189,7 +190,7 @@ class Manager():
 
     def write_row(self, table_name: str, values_tuple: Tuple[Any]) -> int:
         sql_params = ",".join(['?'] * len(values_tuple))
-        sql = "INSERT INTO {0} VALUES (Null, {1})".format(table_name, sql_params)
+        sql = f"INSERT INTO {table_name} VALUES (Null, {sql_params})"
         conn = self.get_connection()
         c = conn.cursor()
         c.execute(sql, values_tuple)
@@ -202,10 +203,90 @@ class Manager():
         conn = self.get_connection()
         for table_name, rows_list in rows_dict.items():
             sql_params = ",".join(['?'] * len(rows_list[0]))
-            sql = "INSERT INTO {0} VALUES (Null, {1})".format(table_name, sql_params)
+            sql = f"INSERT INTO {table_name} VALUES (Null, {sql_params})"
             conn.executemany(sql, rows_list)
         conn.commit()
         conn.close()
+
+    def get_features_dataframe(self, network_id: int) -> pd.DataFrame:
+        sql = f"""
+            SELECT feature_id, name, env
+            FROM features
+            WHERE network_id = {network_id}
+        """
+        conn = self.get_connection()
+        features = pd.read_sql(sql, conn)
+        conn.close()
+        return features
+
+    def get_interactions_dataframe(self, network_id: int) -> pd.DataFrame:
+        sql = f"""
+            SELECT interaction_id, initiator, target, i_anchor, t_anchor
+            FROM interactions
+            WHERE network_id = {network_id}
+        """
+        conn = self.get_connection()
+        interactions = pd.read_sql(sql, conn)
+        conn.close()
+        return interactions
+
+    def get_traits_dataframe(self, network_id: int) -> pd.DataFrame:
+        sql = f"""
+            SELECT trait_id, traits.name, traits.feature_id
+            FROM traits
+            JOIN features
+            ON traits.feature_id = features.feature_id
+            WHERE features.network_id = {network_id}
+        """
+        conn = self.get_connection()
+        traits = pd.read_sql(sql, conn)
+        conn.close()
+        return traits
+
+    def get_payoffs_dataframe(self, network_id: int) -> pd.DataFrame:
+        sql = f"""
+            SELECT interaction_id, payoffs.initiator, payoffs.target, inititator_utils, target_utils
+            FROM payoffs
+            JOIN interactions
+            ON payoffs.interaction_id = interactions.interaction_id
+            WHERE interactions.network_id = {network_id}
+        """
+        conn = self.get_connection()
+        payoffs = pd.read_sql(sql, conn)
+        conn.close()
+        return payoffs
+
+    def get_network_dataframes(self, network_id: int) -> Dict[str, pd.DataFrame:
+        nd = {}
+        nd['features'] = self.get_features_dataframe(network_id)
+        nd['interactions'] = self.get_interactions_dataframe(network_id)
+        nd['traits'] = self.get_traits_dataframe(network_id)
+        nd['payoffs'] = self.get_payoffs_dataframe(network_id)
+
+    def get_spacetime_dataframe(self, world: "World") -> pd.DataFrame:
+        w_id = world.world_id
+        max_steps = world.controller.max_steps
+        sites = [(x,y) for _, x, y in world.grid.coord_iter()]
+        sites.append('world')
+        rows_list = [
+            (w_id, step, str(site))
+            for step in range(max_steps +1)
+            for site in sites
+        ]
+        write_sql = """
+            INSERT INTO spacetime
+            VALUES (Null, ?, ?, ?)
+        """
+        read_sql = f"""
+            SELECT spacetime_id, step_num, site_pos
+            FROM spacetime
+            WHERE world_id = {w_id}
+        """
+        conn = self.get_connection()
+        conn.executemany(write_sql, rows_list)
+        spacetime_df = pd.read_sql(read_sql, conn)
+        conn.close()
+        return spacetime_df
 
     def get_next_record(self, sql: str, keys: List[str]) -> Union[Dict[str, Any], None]:
         conn = self.get_connection()
@@ -304,19 +385,4 @@ class Manager():
             "i_utils",
             "t_utils"
         ]
-        return self.get_records(sql, keys)
-
-    def get_spacetimes(
-        self,
-        world_id,
-        step_num
-    ) -> List[Dict[str, Any]]:
-        sql = """
-            SELECT site_pos,
-                   spacetime_id
-            FROM spacetime
-            WHERE world_id = {0}
-            AND step_num = {1}
-        """.format(world_id, step_num)
-        keys = ["pos", "id"]
         return self.get_records(sql, keys)

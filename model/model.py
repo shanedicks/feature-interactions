@@ -126,9 +126,9 @@ class World(Model):
         self.feature_timeout = feature_timeout
         self.trait_timeout = trait_timeout
         self.target_sample = target_sample
-        self.spacetime_dict = {}
-        row = (self.world_id, self.schedule.time, "world")
-        self.spacetime_dict["world"] = self.db.write_row("spacetime", row)
+        self.spacetime_df = self.db.get_spacetime_dataframe(self)
+        self.spacetime_dict = self.get_spacetime_dict()
+        self.network_dfs = self.db.get_network_dataframes()
         self.get_or_create_init_features_network(
             init_env_features,
             init_agent_features
@@ -161,6 +161,7 @@ class World(Model):
 
     def get_features_list(self, env: bool = False) -> List[Feature]:
         return [f for f in self.feature_interactions.nodes if f.env is env]
+
 
     def next_feature(self, env: bool = False) -> Feature:
         restored = self.db.get_next_feature(
@@ -346,27 +347,26 @@ class World(Model):
             assert shadow_site.moved_out == live.moved_out
             assert shadow_site.born == live.born
 
+    def get_spacetime_dict(self) -> Dict[Union[str,tuple], int]:
+        step = self.schedule.time
+        sdf = self.spacetime_df
+        spacetimes = sdf[sdf.step_num==step].itertuples()
+        spacetime_dict = {}
+        for s in spacetimes:
+            if s.site_pos == "world":
+                spacetime_dict["world"] = s.spacetime_id
+            else:
+                spacetime_dict[eval(s.site_pos)] = s.spacetime_id
+        return spacetime_dict
+
     def step(self):
         self.new = 0
         self.cached = 0
-        step = self.schedule.time
-        row_dict = {"spacetime": []}
-        if step > 0:
-            row = (self.world_id, step, "world")
-            row_dict['spacetime'].append(row)
-        for pos, site in self.sites.items():
-            row = (self.world_id, step, str(pos))
-            row_dict['spacetime'].append(row)
+        for site in self.sites.values():
             site.reset()
-        self.db.write_rows(row_dict)
-        spacetimes = self.db.get_spacetimes(self.world_id, step)
-        for s in spacetimes:
-            if s['pos'] == "world":
-                self.spacetime_dict["world"] = s["id"]
-            else:
-                self.spacetime_dict[eval(s['pos'])] = s["id"]
         for site in self.shadow.sites.values():
             site.reset()
+        self.spacetime_dict = self.get_spacetime_dict()
         self.schedule.step()
         self.verify_shadow()
         self.prune_features()

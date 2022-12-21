@@ -109,6 +109,8 @@ def tables_update(world: "World") -> None:
     get_phenotypes_rows(world, db, sd, rd)
     get_phenotypes_rows(world.shadow, db, sd, rd, True)
     get_sites_rows(world, db, sd, rd)
+    for k in [k for k,v in rd.items() if len(v) == 0]:
+        del rd[k]
     db.write_rows(rd)
 
 
