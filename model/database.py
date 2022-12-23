@@ -215,9 +215,10 @@ class Manager():
             WHERE network_id = {network_id}
         """
         conn = self.get_connection()
-        features = pd.read_sql(sql, conn)
+        df = pd.read_sql(sql, conn)
+        df['env'] = df['env'].astype(bool)
         conn.close()
-        return features
+        return df
 
     def get_interactions_dataframe(self, network_id: int) -> pd.DataFrame:
         sql = f"""
@@ -226,9 +227,9 @@ class Manager():
             WHERE network_id = {network_id}
         """
         conn = self.get_connection()
-        interactions = pd.read_sql(sql, conn)
+        df = pd.read_sql(sql, conn)
         conn.close()
-        return interactions
+        return df
 
     def get_traits_dataframe(self, network_id: int) -> pd.DataFrame:
         sql = f"""
@@ -239,29 +240,34 @@ class Manager():
             WHERE features.network_id = {network_id}
         """
         conn = self.get_connection()
-        traits = pd.read_sql(sql, conn)
+        df = pd.read_sql(sql, conn)
         conn.close()
-        return traits
+        return df
 
     def get_payoffs_dataframe(self, network_id: int) -> pd.DataFrame:
         sql = f"""
-            SELECT interaction_id, payoffs.initiator, payoffs.target, inititator_utils, target_utils
+            SELECT payoffs.interaction_id,
+                   payoffs.initiator,
+                   payoffs.target,
+                   initiator_utils,
+                   target_utils
             FROM payoffs
             JOIN interactions
             ON payoffs.interaction_id = interactions.interaction_id
             WHERE interactions.network_id = {network_id}
         """
         conn = self.get_connection()
-        payoffs = pd.read_sql(sql, conn)
+        df = pd.read_sql(sql, conn)
         conn.close()
-        return payoffs
+        return df
 
-    def get_network_dataframes(self, network_id: int) -> Dict[str, pd.DataFrame:
+    def get_network_dataframes(self, network_id: int) -> Dict[str, pd.DataFrame]:
         nd = {}
         nd['features'] = self.get_features_dataframe(network_id)
         nd['interactions'] = self.get_interactions_dataframe(network_id)
         nd['traits'] = self.get_traits_dataframe(network_id)
         nd['payoffs'] = self.get_payoffs_dataframe(network_id)
+        return nd
 
     def get_spacetime_dataframe(self, world: "World") -> pd.DataFrame:
         w_id = world.world_id
@@ -284,9 +290,9 @@ class Manager():
         """
         conn = self.get_connection()
         conn.executemany(write_sql, rows_list)
-        spacetime_df = pd.read_sql(read_sql, conn)
+        df = pd.read_sql(read_sql, conn)
         conn.close()
-        return spacetime_df
+        return df
 
     def get_next_record(self, sql: str, keys: List[str]) -> Union[Dict[str, Any], None]:
         conn = self.get_connection()
@@ -298,35 +304,28 @@ class Manager():
 
     def get_next_feature(
         self,
-        network_id: int,
-        feature_id: int
+        world: "World"
     ) -> Union[Dict[str, Any], None]:
-        keys = ["feature_id", "name", "env"]
-        sql = """
-            SELECT {0}
-            FROM features
-            WHERE network_id = {1}
-            AND feature_id > {2}
-        """.format(", ".join(keys), network_id, feature_id)
-
-        record = self.get_next_record(sql, keys)
-        if record:
-            record['env'] = bool(record['env'])
-        return record
+        db_id = world.current_feature_db_id
+        df = world.network_dfs['features']
+        df = df[df.feature_id>db_id]
+        if len(df.index) > 0:
+            f_dict = dict(df.iloc[0])
+            f_dict['env'] = bool(f_dict['env'])
+            return f_dict
+        else:
+            return None
 
     def get_next_trait(
         self,
+        world: "World",
         feature_id: int,
         trait_name: str,
     ) -> Union[Dict[str, Any], None]:
-        keys = ["trait_id"]
-        sql = """
-            SELECT {0}
-            FROM traits
-            WHERE feature_id = {1}
-            AND name = '{2}'
-        """.format(", ".join(keys), feature_id, str(trait_name))
-        return self.get_next_record(sql, keys)
+        df = world.network_dfs['traits']
+        df = df[(df.feature_id==feature_id)&(df.name==trait_name)]
+        t_dict = dict(df.iloc[0]) if len(df.index) > 0 else None
+        return t_dict
 
     def get_records(self, sql: str, keys: List[str]) -> List[Dict[str, Any]]:
         conn = self.get_connection()
@@ -334,55 +333,31 @@ class Manager():
         conn.close()
         return [dict(zip(keys, record)) for record in records]
 
-    def get_feature_interactions(self, feature_id) -> List[Dict[str, Any]]:
-        sql = """
-            SELECT interactions.interaction_id,
-                   i.name,
-                   t.name,
-                   interactions.i_anchor,
-                   interactions.t_anchor
-            FROM interactions
-            LEFT JOIN features AS i ON initiator = i.feature_id
-            LEFT JOIN features AS t ON target = t.feature_id
-            WHERE initiator = {0}
-        """.format(feature_id)
-        keys = [
-            "db_id",
-            "initiator",
-            "target",
-            "i_anchor",
-            "t_anchor"
-        ]
-        return self.get_records(sql, keys)
+    def get_feature_interactions(
+            self,
+            world: "World",
+            feature_id: int
+        ) -> List[Dict[str, Any]]:
+        df = world.network_dfs['interactions']
+        df = df[df.initiator==feature_id]
+        df = df.rename(columns={'interaction_id': 'db_id'})
+        return [dict(row) for i, row in df.iterrows()]
 
     def get_interaction_payoffs(
         self,
+        world: "World",
         interaction_id: int,
         i_traits: List[str],
         t_traits: List[str]
     ) -> List[Dict[str, Any]]:
-        sql = """
-            SELECT i.name,
-                   t.name,
-                   payoffs.initiator_utils,
-                   payoffs.target_utils
-            FROM payoffs
-            LEFT JOIN traits AS i ON initiator = i.trait_id
-            LEFT JOIN traits AS t ON target = t.trait_id
-            WHERE interaction_id = {0}
-        """.format(interaction_id, tuple(t_traits))
-        if len(i_traits) > 1:
-            sql = sql + " AND i.name IN {0}".format(tuple(i_traits))
-        elif len(i_traits) == 1:
-            sql = sql + " AND i.name = '{0}'".format(i_traits[0])
-        if len(t_traits) > 1:
-            sql = sql + " AND t.name IN {0}".format(tuple(t_traits))
-        elif len(t_traits) == 1:
-            sql = sql + " AND t.name = '{0}'".format(t_traits[0])
-        keys = [
-            "initiator",
-            "target",
-            "i_utils",
-            "t_utils"
-        ]
-        return self.get_records(sql, keys)
+        p_df = world.network_dfs['payoffs']
+        p_df = p_df[p_df.interaction_id==interaction_id]
+        p_df = p_df.drop(columns=['interaction_id'])
+        t_df = world.network_dfs['traits']
+        t_df = t_df[t_df.trait_id.isin(pd.concat([p_df.initiator, p_df.target]))]
+        df = p_df.replace(t_df.set_index('trait_id')['name'])
+        df = df[(df.initiator.isin(i_traits) & df.target.isin(t_traits))]
+        df = df.rename(
+            columns={'initiator_utils': 'i_utils', 'target_utils': 't_utils'}
+        )
+        return [dict(row) for i, row in df.iterrows()]

@@ -245,7 +245,7 @@ def main():
     with open(sys.argv[1], 'r') as f:
         data = f.read()
     obj = json.loads(data)
-    timestamp = datetime.today().strftime("%Y%m%d_%H%M")
+    timestamp = datetime.today().strftime("%Y%m%d_%H%M%S")
     title = obj['title']
     experiment_name = f"{title}_{timestamp}"
     output_path = obj['output_path']

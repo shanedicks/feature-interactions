@@ -377,6 +377,11 @@ def get_feature_by_name(world: "World", name: str):
     f = f[0] if len(f) > 0 else None
     return f
 
+def get_feature_by_id(world: "World", db_id: int):
+    f = [f for f in world.feature_interactions.nodes if f.db_id == db_id]
+    f = f[0] if len(f) > 0 else None
+    return f
+
 def get_role_by_name(world: "World", name: str):
     f = [f for f in world.feature_interactions.nodes if f.name in name.split(":")]
     return world.roles_dict.get(frozenset(f), None)

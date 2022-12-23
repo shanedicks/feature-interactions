@@ -67,6 +67,7 @@ class Feature:
         value = self.new_value()
         self.values.append(value)
         restored = self.model.db.get_next_trait(
+            self.model,
             self.db_id,
             value,
         )
@@ -100,6 +101,7 @@ class Feature:
             i.payoffs[value] = {}
             target_values = set(i.target.values)
             restored = self.model.db.get_interaction_payoffs(
+                self.model,
                 i.db_id,
                 [value],
                 i.target.values
@@ -118,6 +120,7 @@ class Feature:
         for t in targeted:
             initiator_values = set(t.initiator.values)
             restored = self.model.db.get_interaction_payoffs(
+                self.model,
                 t.db_id,
                 t.initiator.values,
                 [value]
@@ -246,6 +249,7 @@ class Interaction:
         payoff_dict = {i: {} for i in self.initiator.values}
         payoff_set = set(product(self.initiator.values, self.target.values))
         restored = self.model.db.get_interaction_payoffs(
+            self.model,
             self.db_id,
             self.initiator.values,
             self.target.values

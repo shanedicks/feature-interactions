@@ -128,7 +128,7 @@ class World(Model):
         self.target_sample = target_sample
         self.spacetime_df = self.db.get_spacetime_dataframe(self)
         self.spacetime_dict = self.get_spacetime_dict()
-        self.network_dfs = self.db.get_network_dataframes()
+        self.network_dfs = self.db.get_network_dataframes(self.network_id)
         self.get_or_create_init_features_network(
             init_env_features,
             init_agent_features
@@ -162,12 +162,8 @@ class World(Model):
     def get_features_list(self, env: bool = False) -> List[Feature]:
         return [f for f in self.feature_interactions.nodes if f.env is env]
 
-
     def next_feature(self, env: bool = False) -> Feature:
-        restored = self.db.get_next_feature(
-            self.network_id,
-            self.current_feature_db_id
-        )
+        restored = self.db.get_next_feature(self)
         if restored:
             feature = self.restore_feature(restored)
         else:
@@ -194,7 +190,7 @@ class World(Model):
             self.next_feature()
 
     def restore_feature(self, feature_dict: Dict[str, Any]):
-        feature_db_id = feature_dict['feature_id']
+        feature_db_id = int(feature_dict['feature_id'])
         self.current_feature_db_id = feature_db_id
         feature_id = self.next_feature_id()
         feature = Feature(
@@ -209,15 +205,15 @@ class World(Model):
         return feature
 
     def restore_interactions(self, initiator: Feature) -> None:
-        interactions = self.db.get_feature_interactions(initiator.db_id)
+        interactions = self.db.get_feature_interactions(self, initiator.db_id)
         for i in interactions:
-            target = get_feature_by_name(self, i['target'])
+            target = get_feature_by_id(self, i['target'])
             if target:
                 interaction = Interaction(
                     model = self,
                     initiator = initiator,
                     target = target,
-                    db_id = i['db_id'],
+                    db_id = int(i['db_id']),
                     restored = True,
                     anchors = {"i": i['i_anchor'], "t": i['t_anchor']}
                 )
