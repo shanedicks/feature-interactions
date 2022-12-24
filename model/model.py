@@ -129,6 +129,7 @@ class World(Model):
         self.spacetime_df = self.db.get_spacetime_dataframe(self)
         self.spacetime_dict = self.get_spacetime_dict()
         self.network_dfs = self.db.get_network_dataframes(self.network_id)
+        self.network_rows = self.get_network_rows_dict()
         self.get_or_create_init_features_network(
             init_env_features,
             init_agent_features
@@ -166,14 +167,20 @@ class World(Model):
         restored = self.db.get_next_feature(self)
         if restored:
             feature = self.restore_feature(restored)
+            feature_changes_row = (
+                self.spacetime_dict["world"],
+                feature.db_id,
+                "added"
+            )
+            self.network_rows['feature_changes']['r'].append(feature_changes_row)
         else:
             feature = self.create_feature(env=env)
-        feature_changes_row = (
-            self.spacetime_dict["world"],
-            feature.db_id,
-            "added"
-        )
-        self.db.write_row('feature_changes', feature_changes_row)
+            feature_changes_row = (
+                self.spacetime_dict["world"],
+                feature,
+                "added"
+            )
+            self.network_rows['feature_changes']['p'].append(feature_changes_row)
         return feature
 
     def get_or_create_init_features_network(
@@ -274,7 +281,7 @@ class World(Model):
             feature.db_id,
             "removed"
         )
-        self.db.write_row('feature_changes', feature_changes_row)
+        self.network_rows['feature_changes']['r'].append(feature_changes_row)
         in_edges = feature.in_edges()
         out_edges = feature.out_edges()
         self.feature_interactions.remove_node(feature)
@@ -355,6 +362,17 @@ class World(Model):
                 spacetime_dict[eval(s.site_pos)] = s.spacetime_id
         return spacetime_dict
 
+    def get_network_rows_dict(self) -> Dict[str, List[Tuple[Any]]]:
+        return {
+            'features': [],
+            'interactions': [],
+            'traits': {'p': [],'r': []},
+            'feature_changes': {'p': [],'r': []},
+            'trait_changes': {'p': [],'r': []},
+            'payoffs': []
+        }
+
+
     def step(self):
         self.new = 0
         self.cached = 0
@@ -362,7 +380,6 @@ class World(Model):
             site.reset()
         for site in self.shadow.sites.values():
             site.reset()
-        self.spacetime_dict = self.get_spacetime_dict()
         self.schedule.step()
         self.verify_shadow()
         self.prune_features()
@@ -377,7 +394,10 @@ class World(Model):
                 self.controller.max_steps
             )
         )
+        self.db.write_network_rows(self)
+        self.network_rows = self.get_network_rows_dict()
         tables_update(self)
+        self.spacetime_dict = self.get_spacetime_dict()
         print(role_dist(self))
         if self.schedule.get_agent_count == 0:
             self.running = False

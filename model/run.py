@@ -141,7 +141,7 @@ class Controller():
                             world_id = self.db_manager.write_row("worlds", world_row)
                             world = World(self, world_id, network_id,**network_params, **world_params)
                             self.world = world
-                            while world.running and world.schedule.time <= self.max_steps:
+                            while world.running and world.schedule.time < self.max_steps:
                                 world.step()
                             progress.update()
         sys.stdout = orig_stdout

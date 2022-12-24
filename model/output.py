@@ -50,7 +50,6 @@ def get_total_moved(world: "World") -> int:
 
 def get_model_vars_row(
         world: "World",
-        db: "Manager",
         sd: Dict[Tuple[int, int], int],
         rd: Dict[str, List[Dict[str, Any]]]
     ):
@@ -69,7 +68,6 @@ def get_model_vars_row(
 
 def get_phenotypes_rows(
         model: "Model",
-        db: "Manager",
         sd: Dict[Tuple[int, int], int],
         rd: Dict[str, List[Dict[str, Any]]],
         shadow: bool = False,
@@ -82,12 +80,9 @@ def get_phenotypes_rows(
         for phenotype, pop in phenotypes.items():
             row = (spacetime_id, shadow, phenotype, pop)
             rd['phenotypes'].append(row)
-    if len(rd['phenotypes']) == 0:
-        del rd['phenotypes']
 
 def get_sites_rows(
         world: "World",
-        db: "Manager",
         sd: Dict[Tuple[int, int], int],
         rd: Dict[str, List[Tuple[Any]]]
     ) -> None:
@@ -105,10 +100,10 @@ def tables_update(world: "World") -> None:
     db = world.db
     sd = world.spacetime_dict
     rd = {}
-    get_model_vars_row(world, db, sd, rd)
-    get_phenotypes_rows(world, db, sd, rd)
-    get_phenotypes_rows(world.shadow, db, sd, rd, True)
-    get_sites_rows(world, db, sd, rd)
+    get_model_vars_row(world, sd, rd)
+    get_phenotypes_rows(world, sd, rd)
+    get_phenotypes_rows(world.shadow, sd, rd, True)
+    get_sites_rows(world, sd, rd)
     for k in [k for k,v in rd.items() if len(v) == 0]:
         del rd[k]
     db.write_rows(rd)

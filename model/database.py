@@ -1,6 +1,7 @@
 import sqlite3
 import pandas as pd
 from typing import Any, Dict, List, Tuple, Union
+from output import get_feature_by_name
 
 class Manager():
 
@@ -361,3 +362,135 @@ class Manager():
             columns={'initiator_utils': 'i_utils', 'target_utils': 't_utils'}
         )
         return [dict(row) for i, row in df.iterrows()]
+
+    def handle_features(
+        self,
+        world: "World",
+        c: sqlite3.Connection,
+        f_list: List[Tuple[Any]]
+    ) -> None:
+        c.executemany("INSERT INTO features VALUES (Null, ?, ?, ?)", f_list)
+        inserted = c.execute(
+            f"""
+                SELECT feature_id, name
+                FROM features
+                ORDER BY feature_id DESC
+                LIMIT {len(f_list)}
+            """
+        ).fetchall()
+        world.current_feature_db_id = max([i for i,n in inserted])
+        for i, n in inserted:
+            f = get_feature_by_name(world, n)
+            f.db_id = i
+
+    def handle_interactions(
+        self,
+        world: "World",
+        c: sqlite3.Connection,
+        i_list: List["Interaction"]
+    ) -> None:
+        ready = []
+        lookup = {}
+        for i in i_list:
+            i_db = i.initiator.db_id
+            t_db = i.target.db_id
+            row = (
+                world.network_id,
+                i_db,
+                t_db,
+                i.anchors["i"],
+                i.anchors["t"]
+            )
+            ready.append(row)
+            lookup[(i_db, t_db)] = i
+        c.executemany("INSERT INTO interactions VALUES (Null, ?, ?, ?, ?, ?)", ready)
+        inserted = c.execute(
+            f"""
+                SELECT interaction_id, initiator, target
+                FROM interactions
+                ORDER BY interaction_id DESC
+                LIMIT {len(ready)}
+            """
+        ).fetchall()
+        for d, i, t in inserted:
+            interaction = lookup[(i,t)]
+            interaction.db_id = d
+
+    def handle_traits(
+        self,
+        world: "World",
+        c: sqlite3.Connection,
+        t_dict: Dict[str, List[Tuple[Any]]]
+    ) -> None:
+        ready = t_dict['r']
+        for t, f in t_dict['p']:
+            ready.append((t, f.db_id))
+        c.executemany("INSERT INTO traits VALUES (Null, ?, ?)", ready)
+        inserted = c.execute(
+            f"""
+                SELECT trait_id, name, feature_id
+                FROM traits
+                ORDER BY trait_id DESC
+                LIMIT {len(ready)}
+            """
+        ).fetchall()
+        lookup = {f.db_id: f for f in world.feature_interactions.nodes}
+        for td, n, fd in inserted:
+            f = lookup[fd]
+            f.trait_ids[n] = td
+
+    def handle_feature_changes(
+        self,
+        c: sqlite3.Connection,
+        f_dict: Dict[str, List[Tuple[Any]]]
+    ) -> None:
+        ready = f_dict['r']
+        for s, f, t in f_dict['p']:
+            ready.append((s, f.db_id, t))
+        c.executemany("INSERT INTO feature_changes VALUES (Null, ?, ?, ?)", ready)
+
+    def handle_payoffs(
+        self,
+        c: sqlite3.Connection,
+        p_list: List[Tuple[Any]]
+    ) -> None:
+        ready = []
+        for i, i_t, t_t, i_p, t_p in p_list:
+            row = (
+                i.db_id,
+                i.initiator.trait_ids[i_t],
+                i.target.trait_ids[t_t],
+                i_p,
+                t_p
+            )
+            ready.append(row)
+            print(row)
+        c.executemany("INSERT INTO payoffs VALUES (Null, ?, ?, ?, ?, ?)", ready)
+
+    def handle_trait_changes(
+        self,
+        c: sqlite3.Connection,
+        t_dict: Dict[str, List[Tuple[Any]]]
+    ) -> None:
+        ready = t_dict['r']
+        for s, (f,v), t in t_dict['p']:
+            ready.append((s, f.trait_ids[v], t))
+        c.executemany("INSERT INTO trait_changes VALUES (Null, ?, ?, ?)", ready)
+
+    def write_network_rows(self, world: "World"):
+        rd = world.network_rows
+        conn = self.get_connection()
+        if len(rd['features']) > 0:
+            self.handle_features(world, conn, rd['features'])
+        if len(rd['interactions']) > 0:
+            self.handle_interactions(world, conn, rd['interactions'])
+        if len(rd['traits']['p']) > 0 or len(rd['traits']['r']) > 0:
+            self.handle_traits(world, conn, rd['traits'])
+        if len(rd['feature_changes']['p']) > 0 or len(rd['feature_changes']['r']) > 0:
+            self.handle_feature_changes(conn, rd['feature_changes'])
+        if len(rd['trait_changes']['p']) > 0 or len(rd['trait_changes']['r']) > 0:
+            self.handle_trait_changes(conn, rd['trait_changes'])
+        if len(rd['payoffs']) > 0:
+            self.handle_payoffs(conn, rd['payoffs'])
+        conn.commit()
+        conn.close()
