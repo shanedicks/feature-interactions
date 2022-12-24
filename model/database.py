@@ -464,7 +464,6 @@ class Manager():
                 t_p
             )
             ready.append(row)
-            print(row)
         c.executemany("INSERT INTO payoffs VALUES (Null, ?, ?, ?, ?, ?)", ready)
 
     def handle_trait_changes(
