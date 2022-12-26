@@ -243,6 +243,7 @@ class Controller():
                     while world.running and world.schedule.time < self.max_steps:
                         world.step()
             sys.stdout = orig_stdout
+            sys.stderr = orig_stderr
         return
 
 def main():
