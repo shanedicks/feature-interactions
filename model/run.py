@@ -1,6 +1,7 @@
 import itertools
 import json
 import os
+import shutil
 import sys
 from datetime import datetime
 from functools import partial, reduce
@@ -251,6 +252,7 @@ def main():
     output_path = obj['output_path']
     path_to_db = f"{output_path}/{experiment_name}"
     os.mkdir(path_to_db)
+    shutil.copy2(sys.argv[1], path_to_db)
     controller = Controller(
         experiment_name, 
         path_to_db
