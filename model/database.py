@@ -369,7 +369,13 @@ class Manager():
         c: sqlite3.Connection,
         f_list: List[Tuple[Any]]
     ) -> None:
-        c.executemany("INSERT INTO features VALUES (Null, ?, ?, ?)", f_list)
+        ready = []
+        lookup = {}
+        for f in f_list:
+            env = 1 if f.env else 0
+            lookup[f.name] = f
+            ready.append((f.model.network_id, f.name, env))
+        c.executemany("INSERT INTO features VALUES (Null, ?, ?, ?)", ready)
         inserted = c.execute(
             f"""
                 SELECT feature_id, name
@@ -380,8 +386,7 @@ class Manager():
         ).fetchall()
         world.current_feature_db_id = max([i for i,n in inserted])
         for i, n in inserted:
-            f = get_feature_by_name(world, n)
-            f.db_id = i
+            lookup[n].db_id = i
 
     def handle_interactions(
         self,

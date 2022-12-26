@@ -368,7 +368,7 @@ def env_report(world: "World"):
         print(s.pos, pop, s.born - s.died, round(s.pop_cost,2), utils)
 
 def get_feature_by_name(world: "World", name: str):
-    f = [f for f in world.feature_interactions.nodes if f.name is name]
+    f = [f for f in world.feature_interactions.nodes if f.name == name]
     f = f[0] if len(f) > 0 else None
     return f
 

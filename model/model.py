@@ -382,7 +382,6 @@ class World(Model):
             site.reset()
         self.schedule.step()
         self.verify_shadow()
-        self.prune_features()
         print(
             "N:{1}/{5}, W:{3}/{4} id={2}, Step:{0}/{6}".format(
                 self.schedule.time,
@@ -396,6 +395,7 @@ class World(Model):
         )
         self.db.write_network_rows(self)
         self.network_rows = self.get_network_rows_dict()
+        self.prune_features()
         tables_update(self)
         self.spacetime_dict = self.get_spacetime_dict()
         print(role_dist(self))

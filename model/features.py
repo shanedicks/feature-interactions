@@ -36,9 +36,7 @@ class Feature:
         self.env = env
         self.db_id = db_id
         if self.db_id is None:
-            env = 1 if self.env else 0
-            row = (self.model.network_id, self.name, env)
-            self.model.network_rows['features'].append(row)
+            self.model.network_rows['features'].append(self)
         self.empty_steps = 0
         self.empty_traits = {}
         self.trait_ids = {}
