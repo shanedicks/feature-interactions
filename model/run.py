@@ -258,10 +258,10 @@ def main():
         experiment_name, 
         path_to_db
     )
-    num_processes = os.environ.get( 
+    num_processes = int(os.environ.get( 
         'SLURM_CPUS_PER_TASK',
         obj.get('num_processes')
-    )
+    ))
     if num_processes == 1:
         controller.run(
             obj['num_networks'],
