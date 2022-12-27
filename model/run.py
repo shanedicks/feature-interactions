@@ -205,13 +205,11 @@ class Controller():
             1
         )
         orig_stdout = sys.stdout
-        orig_stderr = sys.stderr
         outfile = self.db_manager.db_string.replace(".db", f"_{network_id}.txt")
         errfile = self.db_manager.db_string.replace(".db", f"_{network_id}_err.txt")
         self.world_num = 0
-        with open(outfile, 'w') as out, open(errfile, 'w') as err:
+        with open(outfile, 'w') as out:
             sys.stdout = out
-            sys.stderr = err
             print(f"Network {network_id}\n{network_params}")
             for world_params in world_params_list:
                 for i in range(num_iterations):
@@ -243,7 +241,6 @@ class Controller():
                     while world.running and world.schedule.time < self.max_steps:
                         world.step()
             sys.stdout = orig_stdout
-            sys.stderr = orig_stderr
         return
 
 def main():
