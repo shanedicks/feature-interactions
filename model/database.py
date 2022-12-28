@@ -15,7 +15,7 @@ class Manager():
         self.db_string = f"{path_to_db}/{db_name}"
 
     def get_connection(self):
-        conn = sqlite3.connect(self.db_string, timeout=10)
+        conn = sqlite3.connect(self.db_string, timeout=15)
         return conn
 
     def inspect_db(self) -> sqlite3.Cursor:
