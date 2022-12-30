@@ -210,7 +210,7 @@ class Manager():
             else:
                 sql = f"INSERT INTO {table_name} VALUES (Null, {sql_params})"
             conn.executemany(sql, rows_list)
-        conn.commit()
+            conn.commit()
         conn.close()
 
     def get_features_dataframe(self, conn: sqlite3.Connection, network_id: int) -> pd.DataFrame:
