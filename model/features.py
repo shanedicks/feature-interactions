@@ -156,12 +156,13 @@ class Feature:
                 except KeyError as e:
                     print(e)
         self.values.remove(value)
+        trait_id = self.trait_ids[value]
         del self.empty_traits[value]
         del self.trait_ids[value]
         for s in self.model.sites:
             if value in self.traits_dict[s]:
                 del self.traits_dict[s][value]
-        print(f"Trait {self.trait_ids[value]} {value} removed from {self.db_id} {self}")
+        print(f"Trait {trait_id} {value} removed from {self.db_id} {self}")
 
     def check_empty(self) -> None:
         sd = self.model.sites
