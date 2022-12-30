@@ -8,6 +8,9 @@ from math import comb, log2
 from statistics import mean, median, quantiles
 from typing import Any, Dict, List, Set, Tuple, Iterator
 
+SpacetimeDict = Dict[Tuple[int, int], int]
+RowDict = Dict[str, List[Dict[str, Any]]]
+
 
 
 # Control
@@ -50,8 +53,8 @@ def get_total_moved(world: "World") -> int:
 
 def get_model_vars_row(
         world: "World",
-        sd: Dict[Tuple[int, int], int],
-        rd: Dict[str, List[Dict[str, Any]]]
+        sd: SpacetimeDict,
+        rd: RowDict
     ):
     spacetime_id = sd["world"]
     row = (
@@ -64,16 +67,14 @@ def get_model_vars_row(
         get_num_roles(world),
         get_num_agent_features(world)
     )
-    rd['model_vars'] = [row]
+    rd['model_vars'].append(row)
 
 def get_phenotypes_rows(
         model: "Model",
-        sd: Dict[Tuple[int, int], int],
-        rd: Dict[str, List[Dict[str, Any]]],
+        sd: SpacetimeDict,
+        rd: RowDict,
         shadow: bool = False,
     ) -> None:
-    if 'phenotypes' not in rd:
-        rd['phenotypes'] = []
     for site in model.sites:
         spacetime_id = sd[site]
         phenotypes = phenotype_dist(model, site)
@@ -83,11 +84,9 @@ def get_phenotypes_rows(
 
 def get_sites_rows(
         world: "World",
-        sd: Dict[Tuple[int, int], int],
-        rd: Dict[str, List[Tuple[Any]]]
+        sd: SpacetimeDict,
+        rd: RowDict
     ) -> None:
-    rd['demographics'] = []
-    rd['environment'] = []
     for pos, site in world.sites.items():
         st_id = sd[pos]
         row = (st_id, site.get_pop(), site.born, site.died, site.moved_in, site.moved_out)
@@ -95,19 +94,6 @@ def get_sites_rows(
         for k, v in site.utils.items():
             row = (st_id, k.trait_ids[site.traits[k]], round(v, 2))
             rd['environment'].append(row)
-
-def tables_update(world: "World") -> None:
-    db = world.db
-    sd = world.spacetime_dict
-    rd = {}
-    get_model_vars_row(world, sd, rd)
-    get_phenotypes_rows(world, sd, rd)
-    get_phenotypes_rows(world.shadow, sd, rd, True)
-    get_sites_rows(world, sd, rd)
-    for k in [k for k,v in rd.items() if len(v) == 0]:
-        del rd[k]
-    db.write_rows(rd)
-
 
 # Role Evaluation
 def check_viable(site: "Site", features: Tuple["Feature"]) -> bool:

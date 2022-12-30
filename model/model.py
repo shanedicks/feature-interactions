@@ -129,7 +129,8 @@ class World(Model):
         self.spacetime_df = self.db.get_spacetime_dataframe(self)
         self.spacetime_dict = self.get_spacetime_dict()
         self.network_dfs = self.db.get_network_dataframes(self.network_id)
-        self.network_rows = self.get_network_rows_dict()
+        self.db_ids = self.get_db_ids_dict()
+        self.db_rows = self.get_db_rows_dict()
         self.get_or_create_init_features_network(
             init_env_features,
             init_agent_features
@@ -160,28 +161,13 @@ class World(Model):
         self.current_feature_id += 1
         return self.current_feature_id
 
+    def next_db_id(self, table_name: str):
+        db_id = self.db_ids[table_name]
+        self.db_ids[table_name] += self.controller.total_networks
+        return db_id
+
     def get_features_list(self, env: bool = False) -> List[Feature]:
         return [f for f in self.feature_interactions.nodes if f.env is env]
-
-    def next_feature(self, env: bool = False) -> Feature:
-        restored = self.db.get_next_feature(self)
-        if restored:
-            feature = self.restore_feature(restored)
-            feature_changes_row = (
-                self.spacetime_dict["world"],
-                feature.db_id,
-                "added"
-            )
-            self.network_rows['feature_changes']['r'].append(feature_changes_row)
-        else:
-            feature = self.create_feature(env=env)
-            feature_changes_row = (
-                self.spacetime_dict["world"],
-                feature,
-                "added"
-            )
-            self.network_rows['feature_changes']['p'].append(feature_changes_row)
-        return feature
 
     def get_or_create_init_features_network(
         self,
@@ -195,6 +181,23 @@ class World(Model):
             self.next_feature(env = True)
         for i in range(num_agent):
             self.next_feature()
+        print(f"Env Features {self.get_features_list(env=True)}")
+        print(f"Agent Features {self.get_features_list()}")
+
+    def next_feature(self, env: bool = False) -> Feature:
+        restored = self.db.get_next_feature(self)
+        if restored:
+            feature = self.restore_feature(restored)
+            self.next_db_id('features')
+        else:
+            feature = self.create_feature(env=env)
+        feature_changes_row = (
+            self.spacetime_dict["world"],
+            feature.db_id,
+            "added"
+        )
+        self.db_rows['feature_changes'].append(feature_changes_row)
+        return feature
 
     def restore_feature(self, feature_dict: Dict[str, Any]):
         feature_db_id = int(feature_dict['feature_id'])
@@ -207,8 +210,25 @@ class World(Model):
             env = feature_dict['env']
         )
         self.feature_interactions.add_node(feature)
-        print("restored feature {0}".format(feature))
+        print(f"restored feature {feature.db_id} {feature}")
         self.restore_interactions(feature)
+        return feature
+
+    def create_feature(self, env: bool = False) -> Feature:
+        feature_id = self.next_feature_id()
+        feature = Feature(
+            feature_id = feature_id,
+            model = self,
+            env = env
+        )
+        self.feature_interactions.add_node(feature)
+        if feature.env is False:
+            num_features = self.feature_interactions.number_of_nodes()
+            max_ints = min(self.max_feature_interactions, num_features)
+            num_ints = self.random.randrange(1, max_ints)
+            for i in range(num_ints):
+                self.create_interaction(feature)
+        print(f"New feature {feature.db_id} {feature}")
         return feature
 
     def restore_interactions(self, initiator: Feature) -> None:
@@ -227,7 +247,7 @@ class World(Model):
                 self.feature_interactions.add_edge(
                     initiator, target, interaction = interaction
                 )
-                print("restored interaction {0}".format(interaction))
+                print(f"restored interaction {interaction.db_id} {interaction}")
                 affected_roles = [
                     role for role in self.roles_dict.values()
                     if any(f in role.features for f in [initiator, target])
@@ -250,6 +270,7 @@ class World(Model):
             self.feature_interactions.add_edge(
                 initiator, target, interaction = interaction
             )
+            print(f"new interaction {interaction.db_id} {interaction}")
             affected_roles = [
                 role for role in self.roles_dict.values()
                 if any(f in role.features for f in [initiator, target])
@@ -257,31 +278,14 @@ class World(Model):
             for role in affected_roles:
                 role.interactions = role.get_interactions()
 
-    def create_feature(self, env: bool = False) -> Feature:
-        feature_id = self.next_feature_id()
-        feature = Feature(
-            feature_id = feature_id,
-            model = self,
-            env = env
-        )
-        self.feature_interactions.add_node(feature)
-        if feature.env is False:
-            num_features = self.feature_interactions.number_of_nodes()
-            max_ints = min(self.max_feature_interactions, num_features)
-            num_ints = self.random.randrange(1, max_ints)
-            for i in range(num_ints):
-                self.create_interaction(feature)
-        print('New feature ', feature)
-        return feature
-
     def remove_feature(self, feature: Feature) -> None:
-        print("Removing feature", feature)
+        print(f"Removing feature {feature.db_id} {feature}")
         feature_changes_row = (
             self.spacetime_dict["world"],
             feature.db_id,
             "removed"
         )
-        self.network_rows['feature_changes']['r'].append(feature_changes_row)
+        self.db_rows['feature_changes'].append(feature_changes_row)
         in_edges = feature.in_edges()
         out_edges = feature.out_edges()
         self.feature_interactions.remove_node(feature)
@@ -362,15 +366,41 @@ class World(Model):
                 spacetime_dict[eval(s.site_pos)] = s.spacetime_id
         return spacetime_dict
 
-    def get_network_rows_dict(self) -> Dict[str, List[Tuple[Any]]]:
+    def get_db_ids_dict(self):
+        db_ids = {}
+        for table in ['features', 'interactions', 'traits']:
+            df = self.network_dfs[table]
+            db_ids[table] = self.network_id
+            db_ids[table] += self.controller.total_networks * df.shape[0]
+
+        return db_ids
+
+
+    def get_db_rows_dict(self) -> Dict[str, List[Tuple[Any]]]:
         return {
             'features': [],
             'interactions': [],
-            'traits': {'p': [],'r': []},
-            'feature_changes': {'p': [],'r': []},
-            'trait_changes': {'p': [],'r': []},
-            'payoffs': []
+            'traits': [],
+            'feature_changes': [],
+            'trait_changes': [],
+            'payoffs': [],
+            'model_vars': [],
+            'phenotypes': [],
+            'demographics': [],
+            'environment': []
         }
+
+    def database_update(self) -> None:
+        sd = self.spacetime_dict
+        rd = self.db_rows
+        get_model_vars_row(self, sd, rd)
+        get_phenotypes_rows(self, sd, rd)
+        get_phenotypes_rows(self.shadow, sd, rd, True)
+        get_sites_rows(self, sd, rd)
+        for k in [k for k,v in rd.items() if len(v) == 0]:
+            del rd[k]
+        self.db.write_rows(rd)
+        self.db_rows = self.get_db_rows_dict()
 
 
     def step(self):
@@ -393,10 +423,8 @@ class World(Model):
                 self.controller.max_steps
             )
         )
-        self.db.write_network_rows(self)
-        self.network_rows = self.get_network_rows_dict()
         self.prune_features()
-        tables_update(self)
+        self.database_update()
         self.spacetime_dict = self.get_spacetime_dict()
         print(role_dist(self))
         if self.schedule.get_agent_count == 0:

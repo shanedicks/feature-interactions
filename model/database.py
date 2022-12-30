@@ -27,6 +27,7 @@ class Manager():
     def initialize_db(self) -> None:
         conn = self.get_connection()
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode=WAL")
 
         networks_table = """
             CREATE TABLE IF NOT EXISTS networks (
@@ -204,35 +205,34 @@ class Manager():
         conn = self.get_connection()
         for table_name, rows_list in rows_dict.items():
             sql_params = ",".join(['?'] * len(rows_list[0]))
-            sql = f"INSERT INTO {table_name} VALUES (Null, {sql_params})"
+            if table_name in ['features', 'interactions', 'traits']:
+                sql = f"INSERT INTO {table_name} VALUES ({sql_params})"
+            else:
+                sql = f"INSERT INTO {table_name} VALUES (Null, {sql_params})"
             conn.executemany(sql, rows_list)
         conn.commit()
         conn.close()
 
-    def get_features_dataframe(self, network_id: int) -> pd.DataFrame:
+    def get_features_dataframe(self, conn: sqlite3.Connection, network_id: int) -> pd.DataFrame:
         sql = f"""
             SELECT feature_id, name, env
             FROM features
             WHERE network_id = {network_id}
         """
-        conn = self.get_connection()
         df = pd.read_sql(sql, conn)
         df['env'] = df['env'].astype(bool)
-        conn.close()
         return df
 
-    def get_interactions_dataframe(self, network_id: int) -> pd.DataFrame:
+    def get_interactions_dataframe(self, conn: sqlite3.Connection, network_id: int) -> pd.DataFrame:
         sql = f"""
             SELECT interaction_id, initiator, target, i_anchor, t_anchor
             FROM interactions
             WHERE network_id = {network_id}
         """
-        conn = self.get_connection()
         df = pd.read_sql(sql, conn)
-        conn.close()
         return df
 
-    def get_traits_dataframe(self, network_id: int) -> pd.DataFrame:
+    def get_traits_dataframe(self, conn: sqlite3.Connection, network_id: int) -> pd.DataFrame:
         sql = f"""
             SELECT trait_id, traits.name, traits.feature_id
             FROM traits
@@ -240,12 +240,10 @@ class Manager():
             ON traits.feature_id = features.feature_id
             WHERE features.network_id = {network_id}
         """
-        conn = self.get_connection()
         df = pd.read_sql(sql, conn)
-        conn.close()
         return df
 
-    def get_payoffs_dataframe(self, network_id: int) -> pd.DataFrame:
+    def get_payoffs_dataframe(self, conn: sqlite3.Connection, network_id: int) -> pd.DataFrame:
         sql = f"""
             SELECT payoffs.interaction_id,
                    payoffs.initiator,
@@ -257,17 +255,17 @@ class Manager():
             ON payoffs.interaction_id = interactions.interaction_id
             WHERE interactions.network_id = {network_id}
         """
-        conn = self.get_connection()
         df = pd.read_sql(sql, conn)
-        conn.close()
         return df
 
     def get_network_dataframes(self, network_id: int) -> Dict[str, pd.DataFrame]:
         nd = {}
-        nd['features'] = self.get_features_dataframe(network_id)
-        nd['interactions'] = self.get_interactions_dataframe(network_id)
-        nd['traits'] = self.get_traits_dataframe(network_id)
-        nd['payoffs'] = self.get_payoffs_dataframe(network_id)
+        conn = self.get_connection()
+        nd['features'] = self.get_features_dataframe(conn, network_id)
+        nd['interactions'] = self.get_interactions_dataframe(conn, network_id)
+        nd['traits'] = self.get_traits_dataframe(conn, network_id)
+        nd['payoffs'] = self.get_payoffs_dataframe(conn, network_id)
+        conn.close()
         return nd
 
     def get_spacetime_dataframe(self, world: "World") -> pd.DataFrame:
@@ -291,6 +289,7 @@ class Manager():
         """
         conn = self.get_connection()
         conn.executemany(write_sql, rows_list)
+        conn.commit()
         df = pd.read_sql(read_sql, conn)
         conn.close()
         return df
@@ -363,138 +362,3 @@ class Manager():
         )
         return [dict(row) for i, row in df.iterrows()]
 
-    def handle_features(
-        self,
-        world: "World",
-        c: sqlite3.Connection,
-        f_list: List[Tuple[Any]]
-    ) -> None:
-        ready = []
-        lookup = {}
-        for f in f_list:
-            env = 1 if f.env else 0
-            lookup[f.name] = f
-            ready.append((f.model.network_id, f.name, env))
-        c.executemany("INSERT INTO features VALUES (Null, ?, ?, ?)", ready)
-        inserted = c.execute(
-            f"""
-                SELECT feature_id, name
-                FROM features
-                ORDER BY feature_id DESC
-                LIMIT {len(f_list)}
-            """
-        ).fetchall()
-        world.current_feature_db_id = max([i for i,n in inserted])
-        for i, n in inserted:
-            lookup[n].db_id = i
-
-    def handle_interactions(
-        self,
-        world: "World",
-        c: sqlite3.Connection,
-        i_list: List["Interaction"]
-    ) -> None:
-        ready = []
-        lookup = {}
-        for i in i_list:
-            i_db = i.initiator.db_id
-            t_db = i.target.db_id
-            row = (
-                world.network_id,
-                i_db,
-                t_db,
-                i.anchors["i"],
-                i.anchors["t"]
-            )
-            ready.append(row)
-            lookup[(i_db, t_db)] = i
-        c.executemany("INSERT INTO interactions VALUES (Null, ?, ?, ?, ?, ?)", ready)
-        inserted = c.execute(
-            f"""
-                SELECT interaction_id, initiator, target
-                FROM interactions
-                ORDER BY interaction_id DESC
-                LIMIT {len(ready)}
-            """
-        ).fetchall()
-        for d, i, t in inserted:
-            interaction = lookup[(i,t)]
-            interaction.db_id = d
-
-    def handle_traits(
-        self,
-        world: "World",
-        c: sqlite3.Connection,
-        t_dict: Dict[str, List[Tuple[Any]]]
-    ) -> None:
-        ready = t_dict['r']
-        for t, f in t_dict['p']:
-            ready.append((t, f.db_id))
-        c.executemany("INSERT INTO traits VALUES (Null, ?, ?)", ready)
-        inserted = c.execute(
-            f"""
-                SELECT trait_id, name, feature_id
-                FROM traits
-                ORDER BY trait_id DESC
-                LIMIT {len(ready)}
-            """
-        ).fetchall()
-        lookup = {f.db_id: f for f in world.feature_interactions.nodes}
-        for td, n, fd in inserted:
-            f = lookup[fd]
-            f.trait_ids[n] = td
-
-    def handle_feature_changes(
-        self,
-        c: sqlite3.Connection,
-        f_dict: Dict[str, List[Tuple[Any]]]
-    ) -> None:
-        ready = f_dict['r']
-        for s, f, t in f_dict['p']:
-            ready.append((s, f.db_id, t))
-        c.executemany("INSERT INTO feature_changes VALUES (Null, ?, ?, ?)", ready)
-
-    def handle_payoffs(
-        self,
-        c: sqlite3.Connection,
-        p_list: List[Tuple[Any]]
-    ) -> None:
-        ready = []
-        for i, i_t, t_t, i_p, t_p in p_list:
-            row = (
-                i.db_id,
-                i.initiator.trait_ids[i_t],
-                i.target.trait_ids[t_t],
-                i_p,
-                t_p
-            )
-            ready.append(row)
-        c.executemany("INSERT INTO payoffs VALUES (Null, ?, ?, ?, ?, ?)", ready)
-
-    def handle_trait_changes(
-        self,
-        c: sqlite3.Connection,
-        t_dict: Dict[str, List[Tuple[Any]]]
-    ) -> None:
-        ready = t_dict['r']
-        for s, (f,v), t in t_dict['p']:
-            ready.append((s, f.trait_ids[v], t))
-        c.executemany("INSERT INTO trait_changes VALUES (Null, ?, ?, ?)", ready)
-
-    def write_network_rows(self, world: "World"):
-        rd = world.network_rows
-        conn = self.get_connection()
-        if len(rd['features']) > 0:
-            self.handle_features(world, conn, rd['features'])
-        if len(rd['interactions']) > 0:
-            self.handle_interactions(world, conn, rd['interactions'])
-        if len(rd['traits']['p']) > 0 or len(rd['traits']['r']) > 0:
-            self.handle_traits(world, conn, rd['traits'])
-        if len(rd['feature_changes']['p']) > 0 or len(rd['feature_changes']['r']) > 0:
-            self.handle_feature_changes(conn, rd['feature_changes'])
-        if len(rd['trait_changes']['p']) > 0 or len(rd['trait_changes']['r']) > 0:
-            self.handle_trait_changes(conn, rd['trait_changes'])
-        if len(rd['payoffs']) > 0:
-            self.handle_payoffs(conn, rd['payoffs'])
-        conn.commit()
-        conn.close()

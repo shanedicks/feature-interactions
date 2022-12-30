@@ -36,7 +36,14 @@ class Feature:
         self.env = env
         self.db_id = db_id
         if self.db_id is None:
-            self.model.network_rows['features'].append(self)
+            self.db_id = model.next_db_id('features')
+            row = (
+                self.db_id,
+                model.network_id,
+                self.name,
+                int(env)
+            )
+            self.model.db_rows['features'].append(row)
         self.empty_steps = 0
         self.empty_traits = {}
         self.trait_ids = {}
@@ -70,27 +77,18 @@ class Feature:
         )
         if restored:
             self.trait_ids[value] = restored['trait_id']
-            print("restored trait {0} to feature {1}".format(value, self))
-            trait_changes_row = (
-                self.model.spacetime_dict["world"],
-                restored['trait_id'],
-                "added"
-            )
-            self.model.network_rows['trait_changes']['r'].append(trait_changes_row)
+            print(f"restored {self.trait_ids[value]} {value} to {self.db_id} {self}")
         else:
-            if self.db_id:
-                row = (value, self.db_id)
-                self.model.network_rows['traits']['r'].append(row)
-            else:
-                row = (value, self)
-                self.model.network_rows['traits']['p'].append(row)
-            print("New trait {0} added to feature {1}".format(value, self))
-            trait_changes_row = (
-                self.model.spacetime_dict["world"],
-                (self, value),
-                "added"
-            )
-            self.model.network_rows['trait_changes']['p'].append(trait_changes_row)
+            self.trait_ids[value] = self.model.next_db_id('traits')
+            row = (self.trait_ids[value], value, self.db_id)
+            self.model.db_rows['traits'].append(row)
+            print(f"added {self.trait_ids[value]} {value} to {self.db_id} {self}")
+        trait_changes_row = (
+            self.model.spacetime_dict["world"],
+            self.trait_ids[value],
+            "added"
+        )
+        self.model.db_rows['trait_changes'].append(trait_changes_row)
         if self in self.model.feature_interactions.nodes():
             self.set_payoffs(value)
         return value
@@ -112,13 +110,14 @@ class Feature:
             for p in restored:
                 i.payoffs[p['initiator']][p['target']] = (p['i_utils'], p['t_utils'])
                 target_values.remove(p['target'])
+            i_d, t_d = i.initiator.trait_ids, i.target.trait_ids
             for t_value in target_values:
                 if (i, value, t_value) not in new_payoffs:
                     new_payoffs.add((i, value, t_value))
                     np = i.new_payoff()
                     i.payoffs[value][t_value] = np
-                    row = (i, value, t_value, np[0], np[1])
-                    self.model.network_rows['payoffs'].append(row)
+                    row = (i.db_id, i_d[value], t_d[t_value], np[0], np[1])
+                    self.model.db_rows['payoffs'].append(row)
         for t in targeted:
             initiator_values = set(t.initiator.values)
             restored = self.model.db.get_interaction_payoffs(
@@ -130,13 +129,14 @@ class Feature:
             for p in restored:
                 t.payoffs[p['initiator']][p['target']] = (p['i_utils'], p['t_utils'])
                 initiator_values.remove(p['initiator'])
+            i_d, t_d = t.initiator.trait_ids, t.target.trait_ids
             for i_value in initiator_values:
                 if (t, i_value, value) not in new_payoffs:
                     new_payoffs.add((t, i_value, value))
                     np = t.new_payoff()
                     t.payoffs[i_value][value] = np
-                    row = (t, i_value, value, np[0], np[1])
-                    self.model.network_rows['payoffs'].append(row)
+                    row = (t.db_id, i_d[i_value], t_d[value], np[0], np[1])
+                    self.model.db_rows['payoffs'].append(row)
 
     def remove_trait(self, value: str) -> None:
         initiated = self.out_edges()
@@ -146,7 +146,7 @@ class Feature:
             self.trait_ids[value],
             "removed"
         )
-        self.model.network_rows['trait_changes']['r'].append(trait_changes_row)
+        self.model.db_rows['trait_changes'].append(trait_changes_row)
         for i in initiated:
             del i.payoffs[value]
         for t in targeted:
@@ -161,7 +161,7 @@ class Feature:
         for s in self.model.sites:
             if value in self.traits_dict[s]:
                 del self.traits_dict[s][value]
-        print("Trait {0} removed from feature {1}".format(value, self))
+        print(f"Trait {self.trait_ids[value]} {value} removed from {self.db_id} {self}")
 
     def check_empty(self) -> None:
         sd = self.model.sites
@@ -210,7 +210,16 @@ class Interaction:
         self.anchors = self.set_anchors() if anchors is None else anchors
         self.db_id = db_id
         if self.db_id is None:
-            self.model.network_rows['interactions'].append(self)
+            self.db_id = model.next_db_id('interactions')
+            row = (
+                self.db_id,
+                self.model.network_id,
+                self.initiator.db_id,
+                self.target.db_id,
+                self.anchors['i'],
+                self.anchors['t']
+            )
+            self.model.db_rows['interactions'].append(row)
         if payoffs is None and restored is False:
             self.payoffs = self.construct_payoffs()
         elif restored is True:
@@ -227,12 +236,13 @@ class Interaction:
 
     def construct_payoffs(self) -> PayoffDict:
         payoff_dict = {i: {} for i in self.initiator.values}
+        i_d, t_d = self.initiator.trait_ids, self.target.trait_ids
         for i_value in self.initiator.values:
             for t_value in self.target.values:
                 np = self.new_payoff()
                 payoff_dict[i_value][t_value] = np
-                row = (self, i_value, t_value, np[0], np[1])
-                self.model.network_rows['payoffs'].append(row)
+                row = (self.db_id, i_d[i_value], t_d[t_value], np[0], np[1])
+                self.model.db_rows['payoffs'].append(row)
         return payoff_dict
 
     def restore_payoffs(self) -> PayoffDict:
@@ -247,13 +257,13 @@ class Interaction:
         for p in restored:
             payoff_dict[p['initiator']][p['target']] = (p['i_utils'], p['t_utils'])
             payoff_set.remove((p['initiator'], p['target']))
-        row_dict = {'payoffs': []}
         if len(payoff_set) > 0:
+            i_d, t_d = self.initiator.trait_ids, self.target.trait_ids
             for i_value, t_value in payoff_set:
                 np = self.new_payoff()
                 payoff_dict[i_value][t_value] = np
-                row = (self, i_value, t_value, np[0], np[1])
-                self.model.network_rows['payoffs'].append(row)
+                row = (self.db_id, i_d[i_value], t_d[t_value], np[0], np[1])
+                self.model.db_rows['payoffs'].append(row)
         return payoff_dict
 
     def new_payoff(self) -> Payoff:
