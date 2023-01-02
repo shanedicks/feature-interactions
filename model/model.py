@@ -397,10 +397,12 @@ class World(Model):
         get_phenotypes_rows(self, sd, rd)
         get_phenotypes_rows(self.shadow, sd, rd, True)
         get_sites_rows(self, sd, rd)
-        for k in [k for k,v in rd.items() if len(v) == 0]:
-            del rd[k]
-        self.db.write_rows(rd)
-        self.db_rows = self.get_db_rows_dict()
+        if self.schedule.time % self.controller.db_interval == 0:
+            for k in [k for k,v in rd.items() if len(v) == 0]:
+                del rd[k]
+            print("Writing to DB")
+            self.db.write_rows(rd)
+            self.db_rows = self.get_db_rows_dict()
 
 
     def step(self):

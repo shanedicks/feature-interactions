@@ -32,10 +32,12 @@ class Controller():
     def __init__(
         self,
         experiment_name: str,
-        path_to_db: str
+        path_to_db: str,
+        db_interval = None
     ) -> None:
         self.experiment_name = experiment_name
         self.db_manager = self.get_db_manager(path_to_db)
+        self.db_interval = 1 if not db_interval else db_interval
         self.default_network_params = {
             "init_env_features": 5,
             "init_agent_features": 3,
@@ -254,14 +256,16 @@ def main():
     path_to_db = f"{output_path}/{experiment_name}"
     os.mkdir(path_to_db)
     shutil.copy2(sys.argv[1], path_to_db)
+    db_interval = obj.get('db_interval')
     controller = Controller(
         experiment_name, 
-        path_to_db
+        path_to_db,
+        db_interval
     )
-    num_processes = int(os.environ.get( 
+    num_processes = os.environ.get(
         'SLURM_CPUS_PER_TASK',
         obj.get('num_processes')
-    ))
+    )
     if num_processes == 1:
         controller.run(
             obj['num_networks'],
@@ -271,6 +275,7 @@ def main():
             world_params_dict=obj['world_params']
         )
     else:
+        num_processes = int(num_processes) if num_processes else None
         controller.run_mp(
             obj['num_networks'],
             obj['num_iterations'],
