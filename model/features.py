@@ -163,6 +163,8 @@ class Feature:
             if value in self.traits_dict[s]:
                 del self.traits_dict[s][value]
         print(f"Trait {trait_id} {value} removed from {self.db_id} {self}")
+        if len(self.values) == 0:
+            self.model.remove_feature(self)
 
     def check_empty(self) -> None:
         sd = self.model.sites
