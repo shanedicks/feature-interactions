@@ -1,7 +1,6 @@
 import sqlite3
 import pandas as pd
 from typing import Any, Dict, List, Tuple, Union
-from output import get_feature_by_name
 
 class Manager():
 
@@ -27,7 +26,8 @@ class Manager():
     def initialize_db(self) -> None:
         conn = self.get_connection()
         conn.execute("PRAGMA foreign_keys = ON")
-        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
 
         networks_table = """
             CREATE TABLE IF NOT EXISTS networks (
@@ -362,3 +362,92 @@ class Manager():
         )
         return [dict(row) for i, row in df.iterrows()]
 
+
+#Database Output
+def get_ro_connection(db_path: str) -> sqlite3.Connection:
+    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+
+def get_df(db_path: str, sql: str, index: List[str] = None) -> pd.DataFrame:
+    conn = get_ro_connection(db_path)
+    df = pd.read_sql(sql, conn)
+    conn.close()
+    if index is not None:
+        df.index = pd.MultiIndex.from_frame(df[index])
+        df = df.drop(columns=index)
+    return df
+
+def get_params_df(db_path: str) -> pd.DataFrame:
+    columns = [
+        "world_id",
+        "trait_mutate_chance",
+        "trait_create_chance",
+        "feature_mutate_chance",
+        "feature_create_chance",
+        "feature_gain_chance",
+        "init_agents",
+        "base_agent_utils",
+        "base_env_utils",
+        "total_pop_limit",
+        "pop_cost_exp",
+        "feature_cost_exp",
+        "grid_size",
+        "repr_multi",
+        "mortality",
+        "move_chance",
+        "snap_interval",
+        "feature_timeout",
+        "trait_timeout",
+        "target_sample",
+        "init_env_features",
+        "init_agent_features",
+        "max_interactions",
+        "trait_payoff_mod",
+        "anchor_bias",
+        "payoff_bias",
+    ]
+    sql = f"""SELECT {', '.join(columns)}
+              FROM worlds
+              JOIN networks
+              ON worlds.network_id = networks.network_id"""
+    return get_df(db_path, sql)
+
+def get_model_vars_df(db_path: str) -> pd.DataFrame:
+    columns = [
+        "pop",
+        "total_utility",
+        "mean_utility",
+        "med_utility",
+        "num_types",
+        "num_roles",
+        "num_features",
+        "world_id",
+        "step_num"
+    ]
+    sql = f"""SELECT {', '.join(columns)}
+              FROM model_vars
+              JOIN spacetime
+              ON model_vars.spacetime_id = spacetime.spacetime_id"""
+    return get_df(db_path, sql, index = ['step_num', 'world_id'])
+
+def get_phenotypes_df(db_path: str, **kwargs) -> pd.DataFrame:
+    columns = [
+        "phenotype",
+        "pop",
+        "world_id",
+        "step_num",
+        "site_pos"
+    ]
+    if "shadow" in kwargs:
+        shadow = int(kwargs["shadow"])
+        sql = f"""SELECT {', '.join(columns)}
+                  FROM phenotypes
+                  JOIN spacetime
+                  ON phenotypes.spacetime_id = spacetime.spacetime_id
+                  WHERE shadow = {shadow}"""
+    else:
+        columns.append("shadow")
+        sql = f"""SELECT {', '.join(columns)}
+                  FROM phenotypes
+                  JOIN spacetime
+                  ON phenotypes.spacetime_id = spacetime.spacetime_id"""
+    return get_df(db_path, sql, index = ["step_num", "world_id", "site_pos"])
