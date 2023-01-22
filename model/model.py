@@ -39,6 +39,13 @@ class Shadow(Model):
                     traits = site.traits
                 )
             self.sites[pos] = new_site
+        self.reset_shadow()
+
+    def reset_shadow(self):
+        for shadow_site in self.sites.values():
+            for agent in shadow_site.agents():
+                agent.die()
+        for pos, site in self.model.sites.items():
             for agent in site.agents():
                 new_agent = Agent(
                     unique_id = self.next_id(),
@@ -49,6 +56,7 @@ class Shadow(Model):
                 )
                 self.grid.place_agent(new_agent, pos)
                 new_agent.site = new_agent.get_site()
+        print(f"Shadow Reset")
 
     def get_features_list(self, env: bool = False):
         return self.model.get_features_list(env=env)
@@ -126,6 +134,7 @@ class World(Model):
         self.feature_timeout = feature_timeout
         self.trait_timeout = trait_timeout
         self.target_sample = target_sample
+        self.snap_interval = snap_interval
         self.spacetime_df = self.db.get_spacetime_dataframe(self)
         self.spacetime_dict = self.get_spacetime_dict()
         self.network_dfs = self.db.get_network_dataframes(self.network_id)
@@ -413,7 +422,10 @@ class World(Model):
         for site in self.shadow.sites.values():
             site.reset()
         self.schedule.step()
-        self.verify_shadow()
+        if self.schedule.time % self.snap_interval == 0:
+            self.shadow.reset_shadow()
+        else:
+            self.verify_shadow()
         print(
             "N:{1}/{5}, W:{3}/{4} id={2}, Step:{0}/{6}".format(
                 self.schedule.time,

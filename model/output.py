@@ -6,7 +6,7 @@ from collections import Counter
 from itertools import chain, combinations
 from math import comb, log2
 from statistics import mean, median, quantiles
-from typing import Any, Dict, List, Set, Tuple, Iterator
+from typing import Any, Dict, List, Set, Tuple, Iterator, Callable
 
 SpacetimeDict = Dict[Tuple[int, int], int]
 RowDict = Dict[str, List[Dict[str, Any]]]
@@ -285,6 +285,41 @@ def draw_age_hist(world: "World") -> None:
     ages = [a.age for a in world.schedule.agents]
     plt.hist(ages)
     plt.show()
+
+def add_role_column(df: pd.DataFrame) -> None:
+    df['role'] = df['phenotype'].str.replace('([.a-z])', '', regex=True)
+
+def phenotype_pivot(df: pd.DataFrame) -> pd.DataFrame:
+    return pd.pivot_table(df, index='step_num', columns="phenotype", values="pop", aggfunc='sum')
+
+def role_pivot(df: pd.DataFrame) -> pd.DataFrame:
+    return pd.pivot_table(df, index='step_num', columns="role", values="pop", aggfunc='sum')
+
+def pop_plot(df: pd.DataFrame, title: str) -> None:
+    df.fillna(0).ewm(span=20).mean().plot(legend=False, title=title, xlabel="Step", ylabel="Pop")
+
+def gen_pop_plots(
+    df: pd.DataFrame,
+    wd: Dict[int, int],
+    pivot: Callable,
+    save: bool = False,
+    suffix: str = '',
+    dest: str = '',
+    id_list: list = None
+):
+    if id_list is None:
+        id_list = [i for i in df['world_id'].unique()]
+    pop_type = pivot.__name__.split('_')[0].title()
+    for i in id_list:
+        n_id = wd[i]
+        title = f"{pop_type} Distribution Over Time\nNetwork: {n_id} | World: {i}"
+        pop_plot(pivot(df.loc[df["world_id"]==i]), title)
+        if save:
+            plt.savefig(f"{dest}n{n_id}w{i}{suffix}.png")
+            plt.close()
+        else:
+            plt.show()
+
 
 # Descriptives
 def env_features_dist(world: "World"):

@@ -364,11 +364,11 @@ class Manager():
 
 
 #Database Output
-def get_ro_connection(db_path: str) -> sqlite3.Connection:
-    return sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+def get_connection(db_path: str) -> sqlite3.Connection:
+    return sqlite3.connect(db_path)
 
 def get_df(db_path: str, sql: str, index: List[str] = None) -> pd.DataFrame:
-    conn = get_ro_connection(db_path)
+    conn = get_connection(db_path)
     df = pd.read_sql(sql, conn)
     conn.close()
     if index is not None:
@@ -379,6 +379,7 @@ def get_df(db_path: str, sql: str, index: List[str] = None) -> pd.DataFrame:
 def get_params_df(db_path: str) -> pd.DataFrame:
     columns = [
         "world_id",
+        "worlds.network_id",
         "trait_mutate_chance",
         "trait_create_chance",
         "feature_mutate_chance",
@@ -437,17 +438,31 @@ def get_phenotypes_df(db_path: str, **kwargs) -> pd.DataFrame:
         "step_num",
         "site_pos"
     ]
+    conditions = []
     if "shadow" in kwargs:
         shadow = int(kwargs["shadow"])
+        conditions.append(f"shadow = {shadow}")
+    else:
+        columns.append("shadow")
+    if "worlds" in kwargs:
+        if type(kwargs["worlds"]) is list:
+            conditions.append(f"world_id in {tuple(kwargs['worlds'])}")
+        else:
+            conditions.append(f"world_id = {kwargs['worlds']}")
+    if conditions:
+        where = " AND ".join(conditions)
         sql = f"""SELECT {', '.join(columns)}
                   FROM phenotypes
                   JOIN spacetime
                   ON phenotypes.spacetime_id = spacetime.spacetime_id
-                  WHERE shadow = {shadow}"""
+                  WHERE {where}"""
     else:
         columns.append("shadow")
         sql = f"""SELECT {', '.join(columns)}
                   FROM phenotypes
                   JOIN spacetime
                   ON phenotypes.spacetime_id = spacetime.spacetime_id"""
-    return get_df(db_path, sql, index = ["step_num", "world_id", "site_pos"])
+    return get_df(db_path, sql)
+
+def get_world_dict(db_path) -> Dict[int, int]:
+    return dict(get_params_df(db_path)[['world_id', 'network_id']].itertuples(index=False))
