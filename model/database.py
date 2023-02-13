@@ -1,6 +1,6 @@
 import sqlite3
 import pandas as pd
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Tuple, Union, Optional
 
 class Manager():
 
@@ -205,7 +205,7 @@ class Manager():
         conn = self.get_connection()
         for table_name, rows_list in rows_dict.items():
             sql_params = ",".join(['?'] * len(rows_list[0]))
-            if table_name in ['features', 'interactions', 'traits']:
+            if table_name in ['features', 'interactions', 'traits', 'spacetime']:
                 sql = f"INSERT INTO {table_name} VALUES ({sql_params})"
             else:
                 sql = f"INSERT INTO {table_name} VALUES (Null, {sql_params})"
@@ -430,39 +430,38 @@ def get_model_vars_df(db_path: str) -> pd.DataFrame:
               ON model_vars.spacetime_id = spacetime.spacetime_id"""
     return get_df(db_path, sql, index = ['step_num', 'world_id'])
 
-def get_phenotypes_df(db_path: str, **kwargs) -> pd.DataFrame:
+def get_phenotypes_df(
+    db_path: str,
+    shadow: bool,
+    sites: bool = False,
+    worlds: Optional[Union[List[int], int]] = None
+    ) -> pd.DataFrame:
     columns = [
         "phenotype",
-        "pop",
+        "SUM(pop)",
         "world_id",
-        "step_num",
-        "site_pos"
+        "step_num"
     ]
-    conditions = []
-    if "shadow" in kwargs:
-        shadow = int(kwargs["shadow"])
-        conditions.append(f"shadow = {shadow}")
+    shadow = int(shadow)
+    conditions = [f"shadow = {shadow}"]
+    if sites:
+        columns.append("site_pos")
+        columns[1] = "pop"
+        groupby = ""
     else:
-        columns.append("shadow")
-    if "worlds" in kwargs:
-        if type(kwargs["worlds"]) is list:
-            conditions.append(f"world_id in {tuple(kwargs['worlds'])}")
+        groupby = " GROUP BY world_id, step_num, phenotype"
+    if worlds is not None:
+        if type(worlds) is list:
+            conditions.append(f"world_id in {tuple(worlds)}")
         else:
-            conditions.append(f"world_id = {kwargs['worlds']}")
-    if conditions:
-        where = " AND ".join(conditions)
-        sql = f"""SELECT {', '.join(columns)}
-                  FROM phenotypes
-                  JOIN spacetime
-                  ON phenotypes.spacetime_id = spacetime.spacetime_id
-                  WHERE {where}"""
-    else:
-        columns.append("shadow")
-        sql = f"""SELECT {', '.join(columns)}
-                  FROM phenotypes
-                  JOIN spacetime
-                  ON phenotypes.spacetime_id = spacetime.spacetime_id"""
-    return get_df(db_path, sql)
+            conditions.append(f"world_id = {worlds}")
+    where = " AND ".join(conditions)
+    sql = f"""SELECT {', '.join(columns)}
+              FROM phenotypes
+              JOIN spacetime
+              ON phenotypes.spacetime_id = spacetime.spacetime_id
+              WHERE {where}{groupby};"""
+    return get_df(db_path, sql).rename(columns={'SUM(pop)': 'pop'})
 
 def get_world_dict(db_path) -> Dict[int, int]:
     return dict(get_params_df(db_path)[['world_id', 'network_id']].itertuples(index=False))

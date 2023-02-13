@@ -135,11 +135,11 @@ class World(Model):
         self.trait_timeout = trait_timeout
         self.target_sample = target_sample
         self.snap_interval = snap_interval
-        self.spacetime_df = self.db.get_spacetime_dataframe(self)
+        self.db_rows = self.get_db_rows_dict()
+        self.spacetimes = self.spacetime_enumerator()
         self.spacetime_dict = self.get_spacetime_dict()
         self.network_dfs = self.db.get_network_dataframes(self.network_id)
         self.db_ids = self.get_db_ids_dict()
-        self.db_rows = self.get_db_rows_dict()
         self.get_or_create_init_features_network(
             init_env_features,
             init_agent_features
@@ -363,16 +363,34 @@ class World(Model):
             assert shadow_site.moved_out == live.moved_out
             assert shadow_site.born == live.born
 
+    def spacetime_enumerator(self) -> Iterator:
+        max_steps = self.controller.max_steps
+        sites = [(x,y) for _,x,y in self.grid.coord_iter()]
+        sites.append('world')
+        start = 1 + (max_steps * len(sites) * (self.world_id - 1))
+        return enumerate(
+            [(self.world_id, step, str(site))
+             for step in range(max_steps+1)
+             for site in sites
+            ],
+            start=start)
+
     def get_spacetime_dict(self) -> Dict[Union[str,tuple], int]:
-        step = self.schedule.time
-        sdf = self.spacetime_df
-        spacetimes = sdf[sdf.step_num==step].itertuples()
+        num_sites = (self.grid.height * self.grid.width) + 1
+        spacetimes = [
+            (i, *v )
+            for i, v in [
+                next(self.spacetimes)
+                for i in range(num_sites)
+            ]
+        ]
         spacetime_dict = {}
         for s in spacetimes:
-            if s.site_pos == "world":
-                spacetime_dict["world"] = s.spacetime_id
+            self.db_rows['spacetime'].append(s)
+            if s[3] == "world":
+                spacetime_dict["world"] = s[0]
             else:
-                spacetime_dict[eval(s.site_pos)] = s.spacetime_id
+                spacetime_dict[eval(s[3])] = s[0]
         return spacetime_dict
 
     def get_db_ids_dict(self):
@@ -396,7 +414,8 @@ class World(Model):
             'model_vars': [],
             'phenotypes': [],
             'demographics': [],
-            'environment': []
+            'environment': [],
+            'spacetime': []
         }
 
     def database_update(self) -> None:

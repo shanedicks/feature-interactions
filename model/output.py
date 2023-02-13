@@ -286,7 +286,7 @@ def draw_age_hist(world: "World") -> None:
     plt.hist(ages)
     plt.show()
 
-def add_role_column(df: pd.DataFrame) -> None:
+def role_column(df: pd.DataFrame) -> pd.DataFrame:
     df['role'] = df['phenotype'].str.replace('([.a-z])', '', regex=True)
 
 def phenotype_pivot(df: pd.DataFrame) -> pd.DataFrame:
@@ -313,13 +313,91 @@ def gen_pop_plots(
     for i in id_list:
         n_id = wd[i]
         title = f"{pop_type} Distribution Over Time\nNetwork: {n_id} | World: {i}"
-        pop_plot(pivot(df.loc[df["world_id"]==i]), title)
+        df.loc[df["world_id"]==i].pipe(pivot).pipe(pop_plot, title=title)
         if save:
             plt.savefig(f"{dest}n{n_id}w{i}{suffix}.png")
             plt.close()
         else:
             plt.show()
 
+def activity(df: pd.DataFrame, pivot: Callable) -> pd.DataFrame:
+    return df.pipe(pivot).notna().cumsum()
+
+def pop_activity(df: pd.DataFrame, pivot: Callable) -> pd.DataFrame:
+    return df.pipe(pivot).cumsum()
+
+def diversity(df: pd.DataFrame, pivot: Callable) -> pd.DataFrame:
+    return df.pipe(activity, pivot=pivot).apply(lambda x: x > 0).sum(axis = 1)
+
+def gen_activity_plots(
+    df: pd.DataFrame,
+    wd: Dict[int, int],
+    activity: Callable,
+    pivot: Callable,
+    save: bool = False,
+    suffix: str = '',
+    dest: str = '',
+    id_list: list = None
+    ) -> None:
+    if id_list is None:
+        id_list = [i for i in df['world_id'].unique()]
+    for i in id_list:
+        n_id = wd[i]
+        title = f"Network: {n_id} | World: {i}"
+        activity(df=df, pivot=pivot).plot(legend=False, title=title, xlabel="Step", ylabel="Activity")
+        if save:
+            plt.savefig(f"{dest}activity_n{n_id}w{i}{suffix}.png")
+            plt.close()
+        else:
+            plt.show()
+
+def get_CAD(
+    df: pd.DataFrame,
+    activity: Callable,
+    pivot: Callable,
+    ) -> pd.DataFrame:
+    return df.pipe(activity, pivot=pivot).apply(pd.Series.value_counts, axis = 1)
+
+def CAD_plot(
+    df: pd.DataFrame,
+    s_df: pd.DataFrame,
+    activity: Callable,
+    pivot: Callable,
+    title: str,
+    ) -> None:
+    total = pivot(df).shape[1] + pivot(s_df).shape[1]
+    CAD = get_CAD(df=df, activity=activity, pivot=pivot).sum().div(total).plot(loglog=True, title=title)
+    sCAD = get_CAD(df=s_df, activity=activity, pivot=pivot).sum().div(total).plot(loglog=True, title=title)
+
+def gen_CAD_plots(
+    df: pd.DataFrame,
+    s_df: pd.DataFrame,
+    wd: Dict[int, int],
+    activity: Callable,
+    pivot: Callable,
+    save: bool = False,
+    suffix: str = '',
+    dest: str = '',
+    id_list: list = None
+    ) -> None:
+    if id_list is None:
+        id_list = [i for i in df['world_id'].unique()]
+    pop_type = pivot.__name__.split('_')[0].title()
+    for i in id_list:
+        n_id = wd[i]
+        title = f"Network: {n_id} | World: {i}"
+        CAD_plot(
+            df=df.loc[df["world_id"]==i],
+            s_df=s_df.loc[s_df["world_id"]==i],
+            activity=activity,
+            pivot=pivot,
+            title=title
+        )
+        if save:
+            plt.savefig(f"{dest}/CAD_n{n_id}w{i}{suffix}.png")
+            plt.close()
+        else:
+            plt.show()
 
 # Descriptives
 def env_features_dist(world: "World"):
