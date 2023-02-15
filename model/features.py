@@ -25,6 +25,7 @@ class Feature:
         model: "World",
         feature_id: int,
         env: bool,
+        name = None,
         num_values: int = 5,
         db_id: int = None
     ) -> None:
@@ -32,7 +33,10 @@ class Feature:
         self.current_value_id = 0
         self.current_value_db_id = 0
         self.model = model
-        self.name = name_from_number(feature_id, lower=False)
+        if name:
+            self.name = name
+        else:
+            self.name = name_from_number(feature_id, lower=False)
         self.env = env
         self.db_id = db_id
         if self.db_id is None:

@@ -9,6 +9,7 @@ from multiprocessing import Pool
 from typing import Any, Dict, Iterable, List, Mapping, Union
 from tqdm import tqdm
 from model import World
+from features import Interaction
 from database import Manager
 
 def get_param_set_list(
@@ -33,11 +34,13 @@ class Controller():
         self,
         experiment_name: str,
         path_to_db: str,
-        db_interval = None
+        db_interval = None,
+        features_network = None,
     ) -> None:
         self.experiment_name = experiment_name
         self.db_manager = self.get_db_manager(path_to_db)
         self.db_interval = 1 if not db_interval else db_interval
+        self.features_network = features_network
         self.default_network_params = {
             "init_env_features": 5,
             "init_agent_features": 3,
@@ -71,6 +74,36 @@ class Controller():
     def get_db_manager(self, path_to_db) -> "Manager":
         db_name = f"{self.experiment_name}.db"
         return Manager(path_to_db, db_name)
+
+    def construct_network(self, network_id):
+        n_params = {k: 0 for k in self.default_network_params}
+        w_params = {k: v for k, v in self.default_world_params.items()}
+        w_params['init_agents'] = 0
+        world = World(self, 0, network_id, **n_params, **w_params)
+        print(f"Constructing features network in template world")
+        for f in self.features_network['env_features']:
+            world.next_feature(env=True)
+        for f in self.features_network['agent_features']:
+            world.next_feature()
+        print(f"Env Features {world.get_features_list(env=True)}")
+        print(f"Agent Features {world.get_features_list()}")
+        for i in self.features_network['interactions']:
+            interaction = Interaction(
+                model = world,
+                initiator = world.get_feature_by_name(i['initiator']),
+                target = world.get_feature_by_name(i['target']),
+                anchors = i['anchors']
+            )
+            print(f"{interaction} ({i['initiator']},{i['target']})")
+        db_rows = {
+            'features': world.db_rows['features'],
+            'interactions': world.db_rows['interactions'],
+            'traits': world.db_rows['traits']
+        }
+        print("Construction complete")
+        print("Updating Database with contstructed network")
+        world.db.write_rows(db_rows)
+        print("Database update complete")
 
     def run(
         self,
@@ -114,6 +147,8 @@ class Controller():
                 )
                 for network in range(num_networks):
                     network_id = self.db_manager.write_row('networks', network_row)
+                    if self.features_network:
+                        self.construct_network(network_id)
                     world_param_set = get_param_set_list(world_params_dict)
                     self.world_num = 0
                     for world_params in world_param_set:
@@ -142,6 +177,7 @@ class Controller():
                                 network_id
                             )
                             world_id = self.db_manager.write_row("worlds", world_row)
+                            print(f"World {world_id}\n{world_params}")
                             world = World(self, world_id, network_id,**network_params, **world_params)
                             self.world = world
                             while world.running and world.schedule.time < self.max_steps:
@@ -213,6 +249,8 @@ class Controller():
         with open(outfile, 'w') as out:
             sys.stdout = out
             print(f"Network {network_id}\n{network_params}")
+            if self.features_network:
+                self.construct_network(network_id)
             for world_params in world_params_list:
                 for i in range(num_iterations):
                     self.world_num +=1
@@ -239,6 +277,7 @@ class Controller():
                         network_id
                     )
                     world_id = self.db_manager.write_row("worlds", world_row)
+                    print(f"World {world_id}\n{world_params}")
                     world = World(self, world_id, network_id,**network_params, **world_params)
                     while world.running and world.schedule.time < self.max_steps:
                         world.step()
@@ -250,17 +289,16 @@ def main():
         data = f.read()
     obj = json.loads(data)
     timestamp = datetime.today().strftime("%Y%m%d_%H%M%S")
-    title = obj['title']
-    experiment_name = f"{title}_{timestamp}"
-    output_path = obj['output_path']
-    path_to_db = f"{output_path}/{experiment_name}"
+    experiment_name = f"{obj['title']}_{timestamp}"
+    path_to_db = f"{obj['output_path']}/{experiment_name}"
     os.mkdir(path_to_db)
     shutil.copy2(sys.argv[1], path_to_db)
     db_interval = obj.get('db_interval')
     controller = Controller(
         experiment_name, 
         path_to_db,
-        db_interval
+        obj.get('db_interval'),
+        obj.get('features_network')
     )
     num_processes = os.environ.get(
         'SLURM_CPUS_PER_TASK',

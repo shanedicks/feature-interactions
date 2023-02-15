@@ -178,6 +178,11 @@ class World(Model):
     def get_features_list(self, env: bool = False) -> List[Feature]:
         return [f for f in self.feature_interactions.nodes if f.env is env]
 
+    def get_feature_by_name(self, name: str):
+        f = [f for f in self.feature_interactions.nodes if f.name == name]
+        f = f[0] if len(f) > 0 else None
+        return f
+
     def get_or_create_init_features_network(
         self,
         num_env: int,
@@ -234,9 +239,10 @@ class World(Model):
         if feature.env is False:
             num_features = self.feature_interactions.number_of_nodes()
             max_ints = min(self.max_feature_interactions, num_features)
-            num_ints = self.random.randrange(1, max_ints)
-            for i in range(num_ints):
-                self.create_interaction(feature)
+            if max_ints > 0:
+                num_ints = self.random.randrange(1, max_ints)
+                for i in range(num_ints):
+                    self.create_interaction(feature)
         print(f"New feature {feature.db_id} {feature}")
         return feature
 
