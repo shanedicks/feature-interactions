@@ -295,13 +295,14 @@ def phenotype_pivot(df: pd.DataFrame) -> pd.DataFrame:
 def role_pivot(df: pd.DataFrame) -> pd.DataFrame:
     return pd.pivot_table(df, index='step_num', columns="role", values="pop", aggfunc='sum')
 
-def pop_plot(df: pd.DataFrame, title: str) -> None:
-    df.fillna(0).ewm(span=20).mean().plot(legend=False, title=title, xlabel="Step", ylabel="Pop")
+def pop_plot(df: pd.DataFrame, title: str, legend = False) -> None:
+    df.fillna(0).ewm(span=20).mean().plot(legend=legend, title=title, xlabel="Step", ylabel="Pop")
 
 def gen_pop_plots(
     df: pd.DataFrame,
     wd: Dict[int, int],
     pivot: Callable,
+    legend: bool = False,
     save: bool = False,
     suffix: str = '',
     dest: str = '',
@@ -313,7 +314,7 @@ def gen_pop_plots(
     for i in id_list:
         n_id = wd[i]
         title = f"{pop_type} Distribution Over Time\nNetwork: {n_id} | World: {i}"
-        df.loc[df["world_id"]==i].pipe(pivot).pipe(pop_plot, title=title)
+        df.loc[df["world_id"]==i].pipe(pivot).pipe(pop_plot, title=title, legend=legend)
         if save:
             plt.savefig(f"{dest}n{n_id}w{i}{suffix}.png")
             plt.close()

@@ -466,5 +466,6 @@ class World(Model):
         self.database_update()
         self.spacetime_dict = self.get_spacetime_dict()
         print(role_dist(self))
-        if self.schedule.get_agent_count == 0:
+        if self.schedule.get_agent_count() == 0:
+            print("All the agents are dead... :(")
             self.running = False
