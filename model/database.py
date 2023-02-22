@@ -14,7 +14,7 @@ class Manager():
         self.db_string = f"{path_to_db}/{db_name}"
 
     def get_connection(self):
-        conn = sqlite3.connect(self.db_string, timeout=15)
+        conn = sqlite3.connect(self.db_string, timeout=30)
         return conn
 
     def inspect_db(self) -> sqlite3.Cursor:
@@ -267,32 +267,6 @@ class Manager():
         nd['payoffs'] = self.get_payoffs_dataframe(conn, network_id)
         conn.close()
         return nd
-
-    def get_spacetime_dataframe(self, world: "World") -> pd.DataFrame:
-        w_id = world.world_id
-        max_steps = world.controller.max_steps
-        sites = [(x,y) for _, x, y in world.grid.coord_iter()]
-        sites.append('world')
-        rows_list = [
-            (w_id, step, str(site))
-            for step in range(max_steps +1)
-            for site in sites
-        ]
-        write_sql = """
-            INSERT INTO spacetime
-            VALUES (Null, ?, ?, ?)
-        """
-        read_sql = f"""
-            SELECT spacetime_id, step_num, site_pos
-            FROM spacetime
-            WHERE world_id = {w_id}
-        """
-        conn = self.get_connection()
-        conn.executemany(write_sql, rows_list)
-        conn.commit()
-        df = pd.read_sql(read_sql, conn)
-        conn.close()
-        return df
 
     def get_next_record(self, sql: str, keys: List[str]) -> Union[Dict[str, Any], None]:
         conn = self.get_connection()

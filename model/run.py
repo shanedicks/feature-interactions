@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import sys
+from contextlib import redirect_stdout
 from datetime import datetime
 from functools import partial, reduce
 from multiprocessing import Pool
@@ -130,60 +131,58 @@ class Controller():
         )
         self.max_steps = max_steps
         total = self.total_networks * self.network_worlds
-        orig_stdout = sys.stdout
         filename = self.db_manager.db_string.replace(".db", ".txt")
         progress = tqdm(total=total)
         with open(filename, 'w') as f:
-            sys.stdout = f
-            network_paramset = get_param_set_list(network_params_dict)
-            for network_params in network_paramset:
-                network_row = (
-                    network_params['init_env_features'],
-                    network_params['init_agent_features'],
-                    network_params['max_feature_interactions'],
-                    network_params['trait_payoff_mod'],
-                    network_params['anchor_bias'],
-                    network_params['payoff_bias']
-                )
-                for network in range(num_networks):
-                    network_id = self.db_manager.write_row('networks', network_row)
-                    if self.features_network:
-                        self.construct_network(network_id)
-                    world_param_set = get_param_set_list(world_params_dict)
-                    self.world_num = 0
-                    for world_params in world_param_set:
-                        for i in range(num_iterations):
-                            self.world_num += 1
-                            world_row = (
-                                world_params['trait_mutate_chance'],
-                                world_params['trait_create_chance'],
-                                world_params['feature_mutate_chance'],
-                                world_params['feature_create_chance'],
-                                world_params['feature_gain_chance'],
-                                world_params['feature_timeout'],
-                                world_params['trait_timeout'],
-                                world_params['init_agents'],
-                                world_params['base_agent_utils'],
-                                world_params['base_env_utils'],
-                                world_params['total_pop_limit'],
-                                world_params['pop_cost_exp'],
-                                world_params['feature_cost_exp'],
-                                world_params['grid_size'],
-                                world_params['repr_multi'],
-                                world_params['mortality'],
-                                world_params['move_chance'],
-                                world_params['snap_interval'],
-                                world_params['target_sample'],
-                                network_id
-                            )
-                            world_id = self.db_manager.write_row("worlds", world_row)
-                            print(f"World {world_id}\n{world_params}")
-                            world = World(self, world_id, network_id,**network_params, **world_params)
-                            self.world = world
-                            while world.running and world.schedule.time < self.max_steps:
-                                world.step()
-                            progress.update()
-        sys.stdout = orig_stdout
+            with redirect_stdout(f):
+                network_paramset = get_param_set_list(network_params_dict)
+                for network_params in network_paramset:
+                    network_row = (
+                        network_params['init_env_features'],
+                        network_params['init_agent_features'],
+                        network_params['max_feature_interactions'],
+                        network_params['trait_payoff_mod'],
+                        network_params['anchor_bias'],
+                        network_params['payoff_bias']
+                    )
+                    for network in range(num_networks):
+                        network_id = self.db_manager.write_row('networks', network_row)
+                        if self.features_network:
+                            self.construct_network(network_id)
+                        world_param_set = get_param_set_list(world_params_dict)
+                        self.world_num = 0
+                        for world_params in world_param_set:
+                            for i in range(num_iterations):
+                                self.world_num += 1
+                                world_row = (
+                                    world_params['trait_mutate_chance'],
+                                    world_params['trait_create_chance'],
+                                    world_params['feature_mutate_chance'],
+                                    world_params['feature_create_chance'],
+                                    world_params['feature_gain_chance'],
+                                    world_params['feature_timeout'],
+                                    world_params['trait_timeout'],
+                                    world_params['init_agents'],
+                                    world_params['base_agent_utils'],
+                                    world_params['base_env_utils'],
+                                    world_params['total_pop_limit'],
+                                    world_params['pop_cost_exp'],
+                                    world_params['feature_cost_exp'],
+                                    world_params['grid_size'],
+                                    world_params['repr_multi'],
+                                    world_params['mortality'],
+                                    world_params['move_chance'],
+                                    world_params['snap_interval'],
+                                    world_params['target_sample'],
+                                    network_id
+                                )
+                                world_id = self.db_manager.write_row("worlds", world_row)
+                                print(f"World {world_id}\n{world_params}")
+                                world = World(self, world_id, network_id,**network_params, **world_params)
+                                self.world = world
+                                while world.running and world.schedule.time < self.max_steps:
+                                    world.step()
+                                progress.update()
 
     def run_mp(
         self,
@@ -242,47 +241,43 @@ class Controller():
             [len(v) for v in world_params_dict.values() if isinstance(v, list)],
             1
         )
-        orig_stdout = sys.stdout
         outfile = self.db_manager.db_string.replace(".db", f"_{network_id}.txt")
-        errfile = self.db_manager.db_string.replace(".db", f"_{network_id}_err.txt")
         self.world_num = 0
         with open(outfile, 'w') as out:
-            sys.stdout = out
-            print(f"Network {network_id}\n{network_params}")
-            if self.features_network:
-                self.construct_network(network_id)
-            for world_params in world_params_list:
-                for i in range(num_iterations):
-                    self.world_num +=1
-                    world_row = (
-                        world_params['trait_mutate_chance'],
-                        world_params['trait_create_chance'],
-                        world_params['feature_mutate_chance'],
-                        world_params['feature_create_chance'],
-                        world_params['feature_gain_chance'],
-                        world_params['feature_timeout'],
-                        world_params['trait_timeout'],
-                        world_params['init_agents'],
-                        world_params['base_agent_utils'],
-                        world_params['base_env_utils'],
-                        world_params['total_pop_limit'],
-                        world_params['pop_cost_exp'],
-                        world_params['feature_cost_exp'],
-                        world_params['grid_size'],
-                        world_params['repr_multi'],
-                        world_params['mortality'],
-                        world_params['move_chance'],
-                        world_params['snap_interval'],
-                        world_params['target_sample'],
-                        network_id
-                    )
-                    world_id = self.db_manager.write_row("worlds", world_row)
-                    print(f"World {world_id}\n{world_params}")
-                    world = World(self, world_id, network_id,**network_params, **world_params)
-                    while world.running and world.schedule.time < self.max_steps:
-                        world.step()
-            sys.stdout = orig_stdout
-        return
+            with redirect_stdout(out):
+                print(f"Network {network_id}\n{network_params}")
+                if self.features_network:
+                    self.construct_network(network_id)
+                for world_params in world_params_list:
+                    for i in range(num_iterations):
+                        self.world_num +=1
+                        world_row = (
+                            world_params['trait_mutate_chance'],
+                            world_params['trait_create_chance'],
+                            world_params['feature_mutate_chance'],
+                            world_params['feature_create_chance'],
+                            world_params['feature_gain_chance'],
+                            world_params['feature_timeout'],
+                            world_params['trait_timeout'],
+                            world_params['init_agents'],
+                            world_params['base_agent_utils'],
+                            world_params['base_env_utils'],
+                            world_params['total_pop_limit'],
+                            world_params['pop_cost_exp'],
+                            world_params['feature_cost_exp'],
+                            world_params['grid_size'],
+                            world_params['repr_multi'],
+                            world_params['mortality'],
+                            world_params['move_chance'],
+                            world_params['snap_interval'],
+                            world_params['target_sample'],
+                            network_id
+                        )
+                        world_id = self.db_manager.write_row("worlds", world_row)
+                        print(f"World {world_id}\n{world_params}")
+                        world = World(self, world_id, network_id,**network_params, **world_params)
+                        while world.running and world.schedule.time < self.max_steps:
+                            world.step()
 
 def main():
     with open(sys.argv[1], 'r') as f:
@@ -302,7 +297,7 @@ def main():
     )
     num_processes = os.environ.get(
         'SLURM_CPUS_PER_TASK',
-        obj.get('num_processes')
+        obj.get('num_networks')
     )
     if num_processes == 1:
         controller.run(
