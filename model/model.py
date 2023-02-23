@@ -434,7 +434,7 @@ class World(Model):
         if self.schedule.time % self.controller.db_interval == 0:
             for k in [k for k,v in rd.items() if len(v) == 0]:
                 del rd[k]
-            print("Writing to DB")
+            print("Writing to DB", flush=True)
             self.db.write_rows(rd)
             self.db_rows = self.get_db_rows_dict()
 
@@ -462,10 +462,10 @@ class World(Model):
                 self.controller.max_steps
             )
         )
+        print(role_dist(self))
         self.prune_features()
         self.database_update()
         self.spacetime_dict = self.get_spacetime_dict()
-        print(role_dist(self))
         if self.schedule.get_agent_count() == 0:
             print("All the agents are dead... :(")
             self.running = False
