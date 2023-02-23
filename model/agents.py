@@ -302,16 +302,15 @@ class Agent(Agent):
         if self.utils >= 0:
             self.interact()
         feature_cost = len(self.traits) ** self.model.feature_cost_exp
-        pop_cost = self.model.sites[self.pos].pop_cost
-        cost = feature_cost * pop_cost
+        cost = feature_cost * self.model.sites[self.pos].pop_cost
         self.utils -= cost
-        if self.utils < 0 or self.random.random() < self.model.mortality:
+        if self.utils < 0:
             self.die()
         else:
             self.age += 1
             if self.utils > len(self.traits) * self.model.repr_multi:
                 self.reproduce()
-            if self.start == self.utils - cost \
+            if self.utils == self.start - cost \
             or self.random.random() < self.model.move_chance:
                 self.move()
 

@@ -1,10 +1,30 @@
 from typing import Any, Dict, Iterator, List, Union
 from mesa import Model
 from mesa.space import MultiGrid
-from mesa.time import RandomActivation
+from mesa.time import BaseScheduler
 from agents import Agent, Site
 from features import Feature, Interaction
 from output import *
+
+class SampledActivation(BaseScheduler):
+
+    def agent_buffer(self, size: int) -> Iterator[Agent]:
+        n = self.get_agent_count()
+        if n > size > 0:
+            n = size
+        agent_keys = self.model.random.sample(self._agents.keys(), n)
+        for agent_key in agent_keys:
+            if agent_key in self._agents:
+                yield self._agents[agent_key]
+
+    def step(self) -> None:
+        for agent in self.agent_buffer(self.model.active_pop_limit):
+            agent.step()
+        kill_num = round(self.model.mortality * self.get_agent_count())
+        for agent in self.agent_buffer(kill_num):
+            agent.die()
+        self.steps += 1
+        self.time += 1
 
 
 class Shadow(Model):
@@ -99,6 +119,7 @@ class World(Model):
         move_chance: float,
         snap_interval: int,
         target_sample: int,
+        active_pop_limit: int,
     ) -> None:
         super().__init__()
         assert trait_payoff_mod <= 1 and trait_payoff_mod >= 0
@@ -122,11 +143,12 @@ class World(Model):
         self.repr_multi = repr_multi
         self.mortality = mortality
         self.move_chance = move_chance
+        self.active_pop_limit = active_pop_limit
         self.site_pop_limit = total_pop_limit / (grid_size ** 2)
         self.pop_cost_exp = pop_cost_exp
         self.feature_cost_exp = feature_cost_exp
         self.grid = MultiGrid(grid_size, grid_size, True)
-        self.schedule = RandomActivation(self)
+        self.schedule = SampledActivation(self)
         self.cached_payoffs = {}
         self.roles_dict = {}
         self.site_roles_dict = {}

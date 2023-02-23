@@ -61,6 +61,7 @@ class Controller():
             "init_agents":  900,
             "base_agent_utils": 0.0,
             "base_env_utils": 100.0,
+            "active_pop_limit": 0,
             "total_pop_limit": 6000,
             "pop_cost_exp": 2,
             "feature_cost_exp": .75,
