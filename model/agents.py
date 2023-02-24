@@ -22,6 +22,8 @@ class Site:
         self.moved_in = 0
         self.moved_out = 0
         self.utils = {}
+        x,y = pos
+        self.agents = self.model.grid.grid[x][y]
         if traits is None:
             self.traits = {}
             env_features = self.model.get_features_list(env=True)
@@ -33,11 +35,8 @@ class Site:
         else:
             self.traits = traits
 
-    def agents(self) -> List['Agent']:
-        return self.model.grid.get_cell_list_contents(self.pos)
-
     def get_pop(self) -> int:
-        return len(self.agents())
+        return len(self.agents)
 
     def get_pop_cost(self) -> float:
         m = self.model
@@ -55,13 +54,10 @@ class Site:
             self.utils[feature] = self.model.base_env_utils
         self.pop_cost = self.get_pop_cost()
 
-    def shuffled_sample(self, num: int):
+    def agents_sample(self, num: int):
         if self.get_pop() < num:
-            agents = self.agents()
-            self.random.shuffle(agents)
-        else:
-            agents = self.random.sample(self.agents(), num)
-        return agents
+            num = self.get_pop()
+        return self.random.sample(self.agents, num)
 
     def __repr__(self) -> str:
         return "Site {0}".format(self.pos)
@@ -83,6 +79,8 @@ class Agent(Agent):
         self.age = 0
         self.site = None
         self.role = self.get_role()
+        if not shadow:
+            self.feature_cost = len(self.traits) ** self.model.feature_cost_exp
 
     @property
     def phenotype(self) -> str:
@@ -131,11 +129,10 @@ class Agent(Agent):
         return role
 
     def get_shadow_agent(self) -> Agent:
-        return self.random.choice(self.model.shadow.sites[self.pos].agents())
+        return self.random.choice(self.model.shadow.sites[self.pos].agents)
 
     def get_agent_target(self) -> Union[Agent, None]:
-        initiating = self.role.interactions['initiator']
-        target_features = [x.target for x in initiating if x.target.env == False]
+        target_features = self.role.target_features
         n = self.model.target_sample
         def targetable(target):
             if target.utils >= 0 \
@@ -144,7 +141,7 @@ class Agent(Agent):
                 return True
             else:
                 return False
-        return next(filter(targetable, self.site.shuffled_sample(n)), None)
+        return next(filter(targetable, self.site.agents_sample(n)), None)
 
     def do_env_interactions(self) -> None:
         interactions = [
@@ -224,13 +221,12 @@ class Agent(Agent):
         child_traits = self.traits.copy()
         for feature in child_traits:
             if self.random.random() <= self.model.trait_mutate_chance:
-                new_traits = [
-                    x for x in feature.values if x != child_traits[feature]
-                ]
                 if self.random.random() <= self.model.trait_create_chance \
                 and not self.shadow:
                     child_traits[feature] = feature.next_trait()
                 else:
+                    new_traits = feature.values.copy()
+                    new_traits.remove(child_traits[feature])
                     try:
                         child_traits[feature] = self.random.choice(new_traits)
                     except IndexError:
@@ -301,8 +297,7 @@ class Agent(Agent):
         self.start = self.utils
         if self.utils >= 0:
             self.interact()
-        feature_cost = len(self.traits) ** self.model.feature_cost_exp
-        cost = feature_cost * self.model.sites[self.pos].pop_cost
+        cost = self.feature_cost * self.model.sites[self.pos].pop_cost
         self.utils -= cost
         if self.utils < 0:
             self.die()

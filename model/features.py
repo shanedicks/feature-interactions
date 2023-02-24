@@ -299,10 +299,15 @@ class Role:
         self.features = features
         self.rolename = ":".join(sorted([f.name for f in features]))
         self.interactions = self.get_interactions()
+        self.target_features = self.get_target_features()
         self.neighbors = self.get_neighbors()
         self.types = {
             (x,y): {} for _,x,y in self.model.grid.coord_iter()
         }
+
+    def get_target_features(self):
+        initiating = self.interactions['initiator']
+        return [x.target for x in initiating if not x.target.env]
 
     def get_interactions(self):
         fi = self.model.feature_interactions

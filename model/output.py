@@ -1,5 +1,6 @@
 import matplotlib.pyplot as plt
 import networkx as nx
+import numpy as np
 import pandas as pd
 import random
 from collections import Counter
@@ -22,15 +23,21 @@ def step(world, num_steps):
 def get_population(world: "World") -> int:
     return world.schedule.get_agent_count()
 
-def get_total_utility(world: "World") -> float:
-    return sum([a.utils for a in world.schedule.agents])
+def get_total_utility(world: "World", utils:np.ndarray  = None) -> float:
+    if utils is None:
+        utils = np.array([a.utils for a in world.schedule.agents])
+    return np.sum(utils)
 
-def get_mean_utility(world: "World") -> float:
-    avg = mean([a.utils for a in world.schedule.agents]) if world.schedule.get_agent_count() > 0 else 0
+def get_mean_utility(world: "World", utils: np.ndarray = None) -> float:
+    if utils is None:
+        utils = np.array([a.utils for a in world.schedule.agents])
+    avg = np.mean(utils) if world.schedule.get_agent_count() > 0 else 0
     return avg
 
-def get_median_utility(world: "World") -> int:
-    med = median([a.utils for a in world.schedule.agents]) if world.schedule.get_agent_count() > 0 else 0
+def get_median_utility(world: "World", utils: np.ndarray = None) -> int:
+    if utils is None:
+        utils = np.array([a.utils for a in world.schedule.agents])
+    med = np.median(utils) if world.schedule.get_agent_count() > 0 else 0
     return med
 
 def get_num_agent_features(world: "World") -> int:
@@ -57,12 +64,13 @@ def get_model_vars_row(
         rd: RowDict
     ):
     spacetime_id = sd["world"]
+    utils = np.array([a.utils for a in world.schedule._agents.values()])
     row = (
         spacetime_id,
         get_population(world),
-        get_total_utility(world),
-        get_mean_utility(world),
-        get_median_utility(world),
+        get_total_utility(world, utils),
+        get_mean_utility(world, utils),
+        get_median_utility(world, utils),
         get_num_phenotypes(world),
         get_num_roles(world),
         get_num_agent_features(world)

@@ -35,11 +35,13 @@ class Controller():
         self,
         experiment_name: str,
         path_to_db: str,
+        data_interval = None,
         db_interval = None,
         features_network = None,
     ) -> None:
         self.experiment_name = experiment_name
         self.db_manager = self.get_db_manager(path_to_db)
+        self.data_interval = 1 if not data_interval else data_interval
         self.db_interval = 1 if not db_interval else db_interval
         self.features_network = features_network
         self.default_network_params = {
@@ -291,10 +293,11 @@ def main():
     shutil.copy2(sys.argv[1], path_to_db)
     db_interval = obj.get('db_interval')
     controller = Controller(
-        experiment_name, 
-        path_to_db,
-        obj.get('db_interval'),
-        obj.get('features_network')
+        experiment_name=experiment_name,
+        path_to_db=path_to_db,
+        db_interval=obj.get('db_interval'),
+        data_interval=obj.get('data_interval'),
+        features_network=obj.get('features_network')
     )
     num_processes = os.environ.get(
         'SLURM_CPUS_PER_TASK',

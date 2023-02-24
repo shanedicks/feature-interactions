@@ -1,3 +1,4 @@
+from itertools import compress
 from typing import Any, Dict, Iterator, List, Union
 from mesa import Model
 from mesa.space import MultiGrid
@@ -18,11 +19,20 @@ class SampledActivation(BaseScheduler):
                 yield self._agents[agent_key]
 
     def step(self) -> None:
-        for agent in self.agent_buffer(self.model.active_pop_limit):
+        m = self.model
+        for agent in self.agent_buffer(m.active_pop_limit):
             agent.step()
-        kill_num = round(self.model.mortality * self.get_agent_count())
-        for agent in self.agent_buffer(kill_num):
+        kill_list = [
+            m.random.random() <= m.mortality
+            for i in range(self.get_agent_count())
+        ]
+        n = self.get_agent_count()
+        print(f"2% of {n} is {round(n * self.model.mortality)}")
+        killed = 0
+        for agent in compress(self.agents, kill_list):
             agent.die()
+            killed +=1
+        print(f"{killed} agents died from mortality")
         self.steps += 1
         self.time += 1
 
@@ -63,10 +73,10 @@ class Shadow(Model):
 
     def reset_shadow(self):
         for shadow_site in self.sites.values():
-            for agent in shadow_site.agents():
+            for agent in shadow_site.agents:
                 agent.die()
         for pos, site in self.model.sites.items():
-            for agent in site.agents():
+            for agent in site.agents:
                 new_agent = Agent(
                     unique_id = self.next_id(),
                     model = self,
@@ -166,19 +176,8 @@ class World(Model):
             init_env_features,
             init_agent_features
         )
-        for _, x, y in self.grid.coord_iter():
-            pos = (x,y)
-            site = Site(model = self, pos = pos)
-            self.sites[pos] = site
-            self.site_roles_dict[pos] = {}
-        t_list = list(range(1, init_agent_features+1))
-        for i in range(init_agents):
-            num_traits = self.random.choices(t_list, t_list[::-1])[0]
-            agent = self.create_agent(num_traits = num_traits)
-            self.schedule.add(agent)
-            self.grid.place_agent(agent, agent.pos)
-        for agent in self.schedule.agents:
-            agent.site = agent.get_site()
+        self.create_sites()
+        self.create_init_agents(init_agents)
         self.shadow = Shadow(model=self)
         self.running = True
         print("Environment -------------------")
@@ -219,6 +218,21 @@ class World(Model):
             self.next_feature()
         print(f"Env Features {self.get_features_list(env=True)}")
         print(f"Agent Features {self.get_features_list()}")
+
+    def create_sites(self) -> None:
+        for _, x, y in self.grid.coord_iter():
+            pos = (x,y)
+            site = Site(model = self, pos = pos)
+            self.sites[pos] = site
+            self.site_roles_dict[pos] = {}        
+
+    def create_init_agents(self, init_agents: int) -> None:
+        for i in range(init_agents):
+            agent = self.create_agent()
+            self.schedule.add(agent)
+            self.grid.place_agent(agent, agent.pos)
+        for agent in self.schedule.agents:
+            agent.site = agent.get_site()
 
     def next_feature(self, env: bool = False) -> Feature:
         restored = self.db.get_next_feature(self)
@@ -326,6 +340,7 @@ class World(Model):
         in_edges = feature.in_edges()
         out_edges = feature.out_edges()
         self.feature_interactions.remove_node(feature)
+        self.agent_features.remove(feature)
         affected_features = [x.initiator for x in in_edges]
         affected_features.extend([x.target for x in out_edges])
         affected_roles = [
@@ -361,15 +376,13 @@ class World(Model):
         for feature in pruneable:
             self.remove_feature(feature)
 
-    def create_agent(self, num_traits: int, utils:float = None) -> Agent:
+    def create_agent(self, utils:float = None) -> Agent:
         if utils is None:
             utils = self.base_agent_utils
         traits = {}
         agent_features = self.get_features_list()
-        features = self.random.sample(agent_features, num_traits)
-        for feature in features:
-            value = self.random.choice(feature.values)
-            traits[feature] = value
+        feature = self.random.choice(agent_features)
+        traits[feature] = self.random.choice(feature.values)
         x = self.random.randrange(self.grid_size)
         y = self.random.randrange(self.grid_size)
         agent = Agent(
@@ -447,12 +460,14 @@ class World(Model):
         }
 
     def database_update(self) -> None:
-        sd = self.spacetime_dict
-        rd = self.db_rows
-        get_model_vars_row(self, sd, rd)
-        get_phenotypes_rows(self, sd, rd)
-        get_phenotypes_rows(self.shadow, sd, rd, True)
-        get_sites_rows(self, sd, rd)
+        if self.schedule.time % self.controller.data_interval == 0:
+            print("Recording data", flush=True)
+            sd = self.spacetime_dict
+            rd = self.db_rows
+            get_model_vars_row(self, sd, rd)
+            get_phenotypes_rows(self, sd, rd)
+            get_phenotypes_rows(self.shadow, sd, rd, True)
+            get_sites_rows(self, sd, rd)
         if self.schedule.time % self.controller.db_interval == 0:
             for k in [k for k,v in rd.items() if len(v) == 0]:
                 del rd[k]
@@ -474,14 +489,15 @@ class World(Model):
         else:
             self.verify_shadow()
         print(
-            "N:{1}/{5}, W:{3}/{4} id={2}, Step:{0}/{6}".format(
+            "N:{1}/{5}, W:{3}/{4} id={2}, Step:{0}/{6}, Pop:{7}".format(
                 self.schedule.time,
                 self.network_id,
                 self.world_id,
                 self.controller.world_num,
                 self.controller.network_worlds,
                 self.controller.total_networks,
-                self.controller.max_steps
+                self.controller.max_steps,
+                self.schedule.get_agent_count()
             )
         )
         print(role_dist(self))
