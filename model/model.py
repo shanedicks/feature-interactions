@@ -1,11 +1,77 @@
-from itertools import compress
-from typing import Any, Dict, Iterator, List, Union
+import itertools
+from typing import Any, Dict, Iterator, Iterable, List, Union
 from mesa import Model
-from mesa.space import MultiGrid
+from mesa.space import accept_tuple_argument, Coordinate, Grid, GridContent
 from mesa.time import BaseScheduler
 from agents import Agent, Site
 from features import Feature, Interaction
 from output import *
+
+
+class ListDict(object):
+
+    def __init__(self):
+        self.agent_to_index = {}
+        self.agents = []
+
+    def add_agent(self, agent: Agent):
+        if agent in self.agent_to_index:
+            return
+        self.agents.append(agent)
+        self.agent_to_index[agent] = len(self.agents) - 1
+
+    def remove_agent(self, agent: Agent):
+        index = self.agent_to_index.pop(agent)
+        last_agent = self.agents.pop()
+        if index != len(self.agents):
+            self.agents[index] = last_agent
+            self.agent_to_index[last_agent] = index
+
+    def __iter__(self):
+        return iter(self.items)
+
+    def __len__(self):
+        return len(self.items)
+
+
+class ListDictMultiGrid(Grid):
+
+    @staticmethod
+    def default_val() -> Set[Agent]:
+        """Default value for new cell elements."""
+        return ListDict()
+
+    def _place_agent(self, pos: Coordinate, agent: Agent) -> None:
+        """Place the agent at the correct location."""
+        x, y = pos
+        self.grid[x][y].add_agent(agent)
+        self.empties.discard(pos)
+
+    def _remove_agent(self, pos: Coordinate, agent: Agent) -> None:
+        """Remove the agent from the given location."""
+        x, y = pos
+        self.grid[x][y].remove_agent(agent)
+        if self.is_cell_empty(pos):
+            self.empties.add(pos)
+
+    @accept_tuple_argument
+    def iter_cell_list_contents(
+        self, cell_list: Iterable[Coordinate]
+    ) -> Iterator[GridContent]:
+        """Returns an iterator of the contents of the
+        cells identified in cell_list.
+
+        Args:
+            cell_list: Array-like of (x, y) tuples, or single tuple.
+
+        Returns:
+            A iterator of the contents of the cells identified in cell_list
+
+        """
+        return itertools.chain.from_iterable(
+            self[x][y].agents for x, y in cell_list if not self.is_cell_empty((x, y))
+        )
+
 
 class SampledActivation(BaseScheduler):
 
@@ -29,7 +95,7 @@ class SampledActivation(BaseScheduler):
         n = self.get_agent_count()
         print(f"2% of {n} is {round(n * self.model.mortality)}")
         killed = 0
-        for agent in compress(self.agents, kill_list):
+        for agent in itertools.compress(self.agents, kill_list):
             agent.die()
             killed +=1
         print(f"{killed} agents died from mortality")
@@ -59,7 +125,7 @@ class Shadow(Model):
         self.feature_gain_chance = self.model.feature_gain_chance
         self.site_pop_limit = self.model.site_pop_limit
         self.pop_cost_exp = self.model.pop_cost_exp
-        self.grid = MultiGrid(self.model.grid_size, self.model.grid_size, True)
+        self.grid = ListDictMultiGrid(self.model.grid_size, self.model.grid_size, True)
         self.sites = {}
         self.roles_dict = {}
         for pos, site in self.model.sites.items():
@@ -157,7 +223,7 @@ class World(Model):
         self.site_pop_limit = total_pop_limit / (grid_size ** 2)
         self.pop_cost_exp = pop_cost_exp
         self.feature_cost_exp = feature_cost_exp
-        self.grid = MultiGrid(grid_size, grid_size, True)
+        self.grid = ListDictMultiGrid(grid_size, grid_size, True)
         self.schedule = SampledActivation(self)
         self.cached_payoffs = {}
         self.roles_dict = {}
@@ -224,13 +290,12 @@ class World(Model):
             pos = (x,y)
             site = Site(model = self, pos = pos)
             self.sites[pos] = site
-            self.site_roles_dict[pos] = {}        
+            self.site_roles_dict[pos] = {}
 
     def create_init_agents(self, init_agents: int) -> None:
         for i in range(init_agents):
             agent = self.create_agent()
             self.schedule.add(agent)
-            self.grid.place_agent(agent, agent.pos)
         for agent in self.schedule.agents:
             agent.site = agent.get_site()
 
@@ -391,7 +456,7 @@ class World(Model):
             utils = utils,
             traits = traits,
         )
-        agent.pos = (x,y)
+        self.grid.place_agent(agent, (x,y))
         return agent
 
     def verify_shadow(self):

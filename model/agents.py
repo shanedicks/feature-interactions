@@ -22,8 +22,8 @@ class Site:
         self.moved_in = 0
         self.moved_out = 0
         self.utils = {}
-        x,y = pos
-        self.agents = self.model.grid.grid[x][y]
+        x,y = self.pos
+        self.agents = self.model.grid[x][y].agents
         if traits is None:
             self.traits = {}
             env_features = self.model.get_features_list(env=True)
@@ -34,6 +34,10 @@ class Site:
                 self.utils[feature] = self.model.base_env_utils
         else:
             self.traits = traits
+
+    def get_agent_keys(self) -> None:
+        x, y = self.pos
+        return list(self.model.grid[x][y].keys())
 
     def get_pop(self) -> int:
         return len(self.agents)
@@ -52,11 +56,13 @@ class Site:
         self.moved_out = 0
         for feature in self.utils:
             self.utils[feature] = self.model.base_env_utils
+#        self.agent_keys = self.get_agent_keys()
         self.pop_cost = self.get_pop_cost()
 
-    def agents_sample(self, num: int):
-        if self.get_pop() < num:
-            num = self.get_pop()
+    def agent_sample(self, num: int):
+        pop = self.get_pop()
+        if pop < num:
+            num = pop
         return self.random.sample(self.agents, num)
 
     def __repr__(self) -> str:
@@ -129,19 +135,23 @@ class Agent(Agent):
         return role
 
     def get_shadow_agent(self) -> Agent:
-        return self.random.choice(self.model.shadow.sites[self.pos].agents)
+        shadow_site = self.model.shadow.sites[self.pos]
+        return self.random.choice(shadow_site.agents)
 
     def get_agent_target(self) -> Union[Agent, None]:
         target_features = self.role.target_features
-        n = self.model.target_sample
-        def targetable(target):
-            if target.utils >= 0 \
-            and any(f in target.traits for f in target_features) \
-            and target is not self:
-                return True
-            else:
-                return False
-        return next(filter(targetable, self.site.agents_sample(n)), None)
+        if len(target_features) > 0:
+            n = self.model.target_sample
+            def targetable(target):
+                if target.utils >= 0 \
+                and any(f in target.traits for f in target_features) \
+                and target is not self:
+                    return True
+                else:
+                    return False
+            return next(filter(targetable, self.site.agent_sample(n)), None)
+        else:
+            return None
 
     def do_env_interactions(self) -> None:
         interactions = [
@@ -226,7 +236,10 @@ class Agent(Agent):
                     child_traits[feature] = feature.next_trait()
                 else:
                     new_traits = feature.values.copy()
-                    new_traits.remove(child_traits[feature])
+                    try:
+                        new_traits.remove(child_traits[feature])
+                    except ValueError:
+                        pass
                     try:
                         child_traits[feature] = self.random.choice(new_traits)
                     except IndexError:
@@ -248,6 +261,9 @@ class Agent(Agent):
                 elif len(child_traits) > 0:
                     key = self.random.choice(list(child_traits.keys()))
                     del child_traits[key]
+                    if self.shadow and len(child_traits) == 0:
+                        feature = self.random.choice(features)
+                        child_traits[feature] = self.random.choice(feature.values)
         if len(child_traits) > 0 or self.shadow:
             new_agent = Agent(
                 unique_id = self.model.next_id(),
