@@ -405,7 +405,6 @@ class World(Model):
         in_edges = feature.in_edges()
         out_edges = feature.out_edges()
         self.feature_interactions.remove_node(feature)
-        self.agent_features.remove(feature)
         affected_features = [x.initiator for x in in_edges]
         affected_features.extend([x.target for x in out_edges])
         affected_roles = [
