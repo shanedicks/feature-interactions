@@ -1,4 +1,5 @@
 import itertools
+from datetime import datetime
 from typing import Any, Dict, Iterator, Iterable, List, Union
 from mesa import Model
 from mesa.space import accept_tuple_argument, Coordinate, Grid, GridContent
@@ -535,8 +536,9 @@ class World(Model):
         if self.schedule.time % self.controller.db_interval == 0:
             for k in [k for k,v in rd.items() if len(v) == 0]:
                 del rd[k]
-            print("Writing to DB", flush=True)
+            print(f"Writing to DB {datetime.now()}", flush=True)
             self.db.write_rows(rd)
+            print(f"Write complete {datetime.now()}")
             self.db_rows = self.get_db_rows_dict()
 
 
