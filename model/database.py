@@ -1,6 +1,7 @@
 import sqlite3
 import pandas as pd
 from typing import Any, Dict, List, Tuple, Union, Optional
+from datetime import datetime
 
 class Manager():
 
@@ -204,12 +205,14 @@ class Manager():
     def write_rows(self, rows_dict: Dict[str, List[Tuple[Any]]]) -> None:
         conn = self.get_connection()
         for table_name, rows_list in rows_dict.items():
+            print(f"Writing {table_name} {datetime.now()}")
             sql_params = ",".join(['?'] * len(rows_list[0]))
             if table_name in ['features', 'interactions', 'traits', 'spacetime']:
                 sql = f"INSERT INTO {table_name} VALUES ({sql_params})"
             else:
                 sql = f"INSERT INTO {table_name} VALUES (Null, {sql_params})"
             conn.executemany(sql, rows_list)
+            print(datetime.now())
         conn.commit()
         conn.close()
 
