@@ -6,7 +6,7 @@ import sys
 from contextlib import redirect_stdout
 from datetime import datetime
 from functools import partial, reduce
-from multiprocessing import Pool, 
+from multiprocessing import Pool
 from typing import Any, Dict, Iterable, List, Mapping, Union
 from tqdm import tqdm
 from model import World
