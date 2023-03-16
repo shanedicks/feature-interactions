@@ -6,7 +6,7 @@ import sys
 from contextlib import redirect_stdout
 from datetime import datetime
 from functools import partial, reduce
-from multiprocessing import Pool
+from multiprocessing import Pool, 
 from typing import Any, Dict, Iterable, List, Mapping, Union
 from tqdm import tqdm
 from model import World
@@ -250,7 +250,7 @@ class Controller():
         self.world_num = 0
         with open(outfile, 'w') as out:
             with redirect_stdout(out):
-                print(f"Network {network_id}\n{network_params}")
+                print(f"Network {network_id} running in process {os.getpid()}\n{network_params}")
                 if self.features_network:
                     self.construct_network(network_id)
                 for world_params in world_params_list:
