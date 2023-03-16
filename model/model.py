@@ -524,8 +524,8 @@ class World(Model):
             'spacetime': []
         }
 
-    def database_update(self) -> None:
-        if self.schedule.time % self.controller.data_interval == 0:
+    def database_update(self, override: bool = False) -> None:
+        if self.schedule.time % self.controller.data_interval == 0 or override:
             print("Recording data", flush=True)
             sd = self.spacetime_dict
             rd = self.db_rows
@@ -533,7 +533,7 @@ class World(Model):
             get_phenotypes_rows(self, sd, rd)
             get_phenotypes_rows(self.shadow, sd, rd, True)
             get_sites_rows(self, sd, rd)
-        if self.schedule.time % self.controller.db_interval == 0:
+        if self.schedule.time % self.controller.db_interval == 0 or override:
             for k in [k for k,v in rd.items() if len(v) == 0]:
                 del rd[k]
             print(f"Writing to DB {datetime.now()}", flush=True)

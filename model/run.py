@@ -185,6 +185,8 @@ class Controller():
                                 self.world = world
                                 while world.running and world.schedule.time < self.max_steps:
                                     world.step()
+                                if not world.running:
+                                    world.database_update(override=True)
                                 progress.update()
 
     def run_mp(
@@ -281,6 +283,8 @@ class Controller():
                         world = World(self, world_id, network_id,**network_params, **world_params)
                         while world.running and world.schedule.time < self.max_steps:
                             world.step()
+                        if not world.running:
+                            world.database_update(override=True)
 
 def main():
     with open(sys.argv[1], 'r') as f:
