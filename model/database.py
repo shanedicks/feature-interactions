@@ -15,7 +15,7 @@ class Manager():
         self.db_string = f"{path_to_db}/{db_name}"
 
     def get_connection(self):
-        conn = sqlite3.connect(self.db_string, timeout=30)
+        conn = sqlite3.connect(self.db_string, timeout=300)
         return conn
 
     def inspect_db(self) -> sqlite3.Cursor:
@@ -212,8 +212,8 @@ class Manager():
             else:
                 sql = f"INSERT INTO {table_name} VALUES (Null, {sql_params})"
             conn.executemany(sql, rows_list)
+            conn.commit()
             print(datetime.now())
-        conn.commit()
         conn.close()
 
     def get_features_dataframe(self, conn: sqlite3.Connection, network_id: int) -> pd.DataFrame:

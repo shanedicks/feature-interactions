@@ -526,19 +526,20 @@ class World(Model):
 
     def database_update(self, override: bool = False) -> None:
         if self.schedule.time % self.controller.data_interval == 0 or override:
-            print("Recording data", flush=True)
+            print("Recording")
             sd = self.spacetime_dict
             rd = self.db_rows
             get_model_vars_row(self, sd, rd)
             get_phenotypes_rows(self, sd, rd)
             get_phenotypes_rows(self.shadow, sd, rd, True)
             get_sites_rows(self, sd, rd)
+            print(f"Recorded {datetime.now()}", flush=True)
         if self.schedule.time % self.controller.db_interval == 0 or override:
             for k in [k for k,v in rd.items() if len(v) == 0]:
                 del rd[k]
-            print(f"Writing to DB {datetime.now()}", flush=True)
+            print(f"Writing to DB {datetime.now()}")
             self.db.write_rows(rd)
-            print(f"Write complete {datetime.now()}")
+            print(f"Write complete {datetime.now()}", flush=True)
             self.db_rows = self.get_db_rows_dict()
 
 
