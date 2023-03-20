@@ -262,6 +262,10 @@ class Agent(Agent):
                     key = self.random.choice(list(child_traits.keys()))
                     del child_traits[key]
                     if self.shadow and len(child_traits) == 0:
+                        features = [
+                            f for f in self.model.feature_interactions.nodes
+                            if f.env is False
+                        ]
                         feature = self.random.choice(features)
                         child_traits[feature] = self.random.choice(feature.values)
         if len(child_traits) > 0 or self.shadow:
