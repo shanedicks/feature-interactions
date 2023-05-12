@@ -208,9 +208,9 @@ class Manager():
             print(f"Writing {table_name} {datetime.now()}")
             sql_params = ",".join(['?'] * len(rows_list[0]))
             if table_name in ['features', 'interactions', 'traits', 'spacetime']:
-                sql = f"INSERT INTO {table_name} VALUES ({sql_params})"
+                sql = f"INSERT INTO {table_name} VALUES ({sql_params});"
             else:
-                sql = f"INSERT INTO {table_name} VALUES (Null, {sql_params})"
+                sql = f"INSERT INTO {table_name} VALUES (Null, {sql_params});"
             conn.executemany(sql, rows_list)
             conn.commit()
             print(datetime.now())
@@ -220,7 +220,7 @@ class Manager():
         sql = f"""
             SELECT feature_id, name, env
             FROM features
-            WHERE network_id = {network_id}
+            WHERE network_id = {network_id};
         """
         df = pd.read_sql(sql, conn)
         df['env'] = df['env'].astype(bool)
@@ -230,7 +230,7 @@ class Manager():
         sql = f"""
             SELECT interaction_id, initiator, target, i_anchor, t_anchor
             FROM interactions
-            WHERE network_id = {network_id}
+            WHERE network_id = {network_id};
         """
         df = pd.read_sql(sql, conn)
         return df
@@ -241,7 +241,7 @@ class Manager():
             FROM traits
             JOIN features
             ON traits.feature_id = features.feature_id
-            WHERE features.network_id = {network_id}
+            WHERE features.network_id = {network_id};
         """
         df = pd.read_sql(sql, conn)
         return df
@@ -256,7 +256,7 @@ class Manager():
             FROM payoffs
             JOIN interactions
             ON payoffs.interaction_id = interactions.interaction_id
-            WHERE interactions.network_id = {network_id}
+            WHERE interactions.network_id = {network_id};
         """
         df = pd.read_sql(sql, conn)
         return df
@@ -344,13 +344,13 @@ class Manager():
 def get_connection(db_path: str) -> sqlite3.Connection:
     return sqlite3.connect(db_path)
 
-def get_df(db_path: str, sql: str, index: List[str] = None) -> pd.DataFrame:
+def get_df(db_path: str, sql: str, dtype: Optional[Dict[str, str]] = None) -> pd.DataFrame:
     conn = get_connection(db_path)
-    df = pd.read_sql(sql, conn)
+    if dtype is None:
+        df = pd.read_sql(sql, conn)
+    else:
+        df = pd.read_sql_query(sql, conn, dtype=dtype)
     conn.close()
-    if index is not None:
-        df.index = pd.MultiIndex.from_frame(df[index])
-        df = df.drop(columns=index)
     return df
 
 def get_params_df(db_path: str) -> pd.DataFrame:
@@ -386,7 +386,7 @@ def get_params_df(db_path: str) -> pd.DataFrame:
     sql = f"""SELECT {', '.join(columns)}
               FROM worlds
               JOIN networks
-              ON worlds.network_id = networks.network_id"""
+              ON worlds.network_id = networks.network_id;"""
     return get_df(db_path, sql)
 
 def get_model_vars_df(db_path: str) -> pd.DataFrame:
@@ -404,41 +404,53 @@ def get_model_vars_df(db_path: str) -> pd.DataFrame:
     sql = f"""SELECT {', '.join(columns)}
               FROM model_vars
               JOIN spacetime
-              ON model_vars.spacetime_id = spacetime.spacetime_id"""
-    return get_df(db_path, sql, index = ['step_num', 'world_id'])
+              ON model_vars.spacetime_id = spacetime.spacetime_id;"""
+    df = get_df(db_path, sql)
+    df.index = step_num
+    return get_df(db_path, sql)
 
 def get_phenotypes_df(
     db_path: str,
     shadow: bool,
     sites: bool = False,
-    worlds: Optional[Union[List[int], int]] = None
+    worlds: Optional[Union[List[int], int]] = None,
+    phenotypes: Union[Tuple[str], str] = None,
     ) -> pd.DataFrame:
     columns = [
         "phenotype",
-        "SUM(pop)",
+        "SUM(pop) as pop",
         "world_id",
         "step_num"
     ]
-    shadow = int(shadow)
-    conditions = [f"shadow = {shadow}"]
+    dtype = {
+        'phenotype': 'category',
+    }
+    conditions = [f"shadow = {int(shadow)}"]
     if sites:
         columns.append("site_pos")
         columns[1] = "pop"
         groupby = ""
+        dtype['site_pos'] = 'category'
     else:
         groupby = " GROUP BY world_id, step_num, phenotype"
     if worlds is not None:
-        if type(worlds) is list:
+        if type(worlds) is tuple:
             conditions.append(f"world_id in {tuple(worlds)}")
         else:
             conditions.append(f"world_id = {worlds}")
+    if phenotypes is not None:
+        if type(phenotypes) is tuple:
+            conditions.append(f"phenotype in {phenotypes}")
+        else:
+            conditions.append(f"phenotype = {phenotypes}")
     where = " AND ".join(conditions)
     sql = f"""SELECT {', '.join(columns)}
               FROM phenotypes
               JOIN spacetime
               ON phenotypes.spacetime_id = spacetime.spacetime_id
               WHERE {where}{groupby};"""
-    return get_df(db_path, sql).rename(columns={'SUM(pop)': 'pop'})
+    return get_df(db_path, sql, dtype=dtype)
 
 def get_world_dict(db_path) -> Dict[int, int]:
     return dict(get_params_df(db_path)[['world_id', 'network_id']].itertuples(index=False))
+
