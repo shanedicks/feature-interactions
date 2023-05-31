@@ -405,8 +405,6 @@ def get_model_vars_df(db_path: str) -> pd.DataFrame:
               FROM model_vars
               JOIN spacetime
               ON model_vars.spacetime_id = spacetime.spacetime_id;"""
-    df = get_df(db_path, sql)
-    df.index = step_num
     return get_df(db_path, sql)
 
 def get_phenotypes_df(

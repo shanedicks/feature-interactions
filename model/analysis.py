@@ -14,25 +14,22 @@ class BasePlot:
         self,
         db_loc: str,
         db_name: str,
-        output_directory_name: str,
+        output_directory: str,
     ) -> None:
         self.db_loc = db_loc
         self.db_name = db_name
         self.db_path = os.path.join(db_loc, db_name)
         self.output_directory = output_directory
+        self.plot_dir = self.get_or_create_output_directory()
+        self.world_dict = db.get_world_dict(self.db_path)
 
     def get_or_create_output_directory(self):
         output_path = os.path.join(self.db_loc, self.output_directory)
-        if not os.path.exists(self.path):
+        if not os.path.exists(output_path):
             os.mkdir(output_path)
         return output_path
 
-    def plot(self, get_df: Callable, plot_type: str):
-        plot_dir = self.create_output_directory()
-        world_dict = db.get_world_dict(self.db_path)
-        self.generate_plots(plot_dir, world_dict)
-
-    def generate_plots(self, plot_dir: str, world_dict: Dict[int, int]):
+    def plot(self):
         ...
 
 
@@ -44,27 +41,26 @@ class PopulationPlot(BasePlot):
     ) -> None:
         super().__init__(
             db_loc = db_loc,
-            db_path = db_path,
+            db_name = db_name,
             output_directory = 'pop_plots'
         )
 
-    def generate_plots(self, plot_dir: str, world_dict: Dict[int,int]):
+    def plot(self):
         for shadow in [False, True]:
             s = ["", "s_"][shadow]
-            for w, n in world_dict.items():
+            for w, n in self.world_dict.items():
                 print(f"Trying world {w}")
-                ph_df = db.get_phenotypes_df(db_path, shadow, worlds=w)
-                if resolution is not None:
-                    ph_df = ph_df[ph_df['step_num'] % resolution == 0]
-                m = ph_df.groupby('phenotype')['pop'].sum()
-                phenotypes = tuple(m.nlargest(1000).index)
-                ph_df = db.get_phenotypes_df(db_path, shadow, worlds=w, phenotypes=phenotypes)
-                self.save_pivot_fig(plot_dir, ph_df, self.phenotype_pivot, shadow, w, n)
-                role_column(ph_df)
-                self.save_pivot_fig(plot_dir, ph_df, self.role_pivot, shadow, w, n)
+                ph_df = db.get_phenotypes_df(self.db_path, shadow, worlds=w)
+                if not ph_df.empty:
+                    m = ph_df.groupby('phenotype')['pop'].sum()
+                    phenotypes = tuple(m.nlargest(1000).index)
+                    ph_df = db.get_phenotypes_df(self.db_path, shadow, worlds=w, phenotypes=phenotypes)
+                    self.save_pivot_fig(ph_df, self.phenotype_pivot, shadow, w, n)
+                    role_column(ph_df)
+                    self.save_pivot_fig(ph_df, self.role_pivot, shadow, w, n)
 
     def save_pivot_fig(
-        plot_dir: str,
+        self,
         df: pd.DataFrame,
         pivot: Callable,
         shadow: bool,
@@ -77,24 +73,57 @@ class PopulationPlot(BasePlot):
             title = f"{pop_type} Distribution Over Time\n Network:{n} | World: {w}"
             df.pipe(pivot).pipe(self.pop_plot, title=title)
             plt.tight_layout()
-            plt.savefig(f"{plot_dir}/{prefix}_n{n}w{w}.png")
+            plt.savefig(f"{self.plot_dir}/{prefix}_n{n}w{w}.png")
             plt.close()
 
-    def phenotype_pivot(df: pd.DataFrame) -> pd.DataFrame:
+    def phenotype_pivot(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.pivot_table(df, index='step_num', columns="phenotype", values="pop", aggfunc='sum')
 
-    def role_pivot(df: pd.DataFrame) -> pd.DataFrame:
+    def role_pivot(self, df: pd.DataFrame) -> pd.DataFrame:
         return pd.pivot_table(df, index='step_num', columns="role", values="pop", aggfunc='sum')
 
-    def pop_plot(df: pd.DataFrame, title: str, legend = False) -> None:
-        df.ewm(span=20).mean().plot(
+    def pop_plot(self, df: pd.DataFrame, title: str, legend = False) -> None:
+        df.ewm(span=20).mean().plot.area(
             legend=legend,
             title=title,
-            xlabel="Step Num", 
+            xlabel="Step",
             ylabel="Population",
-            figsize=(19.2, 9.66),
-            layout="tight"
+            figsize=(19.2, 9.66)
         )
+
+class ModelVarsPlot(BasePlot):
+
+    def __init__(
+        self,
+        db_loc: str,
+        db_name: str,
+    ) -> None:
+        super().__init__(
+            db_loc = db_loc,
+            db_name = db_name,
+            output_directory = 'mv_plots'
+        )
+
+    def plot(self):
+        nd = {
+            i: [j for j in self.world_dict if self.world_dict[j] == i]
+            for i in self.world_dict.values()
+        }
+        mv_df = db.get_model_vars_df(self.db_path)
+        for column in mv_df.columns[:7]:
+            df = mv_df.pivot(index='step_num', columns='world_id', values=column).fillna(0)
+            name = column.replace('_', ' ').title()
+            for n in nd:
+                title = f"{name} Over Time\n Network {n}"
+                df[nd[n]].ewm(span=100).mean().plot(
+                    title=title,
+                    xlabel="Step",
+                    ylabel=name,
+                    figsize=(19.2, 9.66),
+                )
+                plt.tight_layout()
+                plt.savefig(f"{self.plot_dir}/{column}_{n}.png")
+                plt.close()
 
 def activity(df: pd.DataFrame, pivot: Callable) -> pd.DataFrame:
     return df.pipe(pivot).notna().cumsum()
