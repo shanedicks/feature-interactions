@@ -1,7 +1,8 @@
+import os
+import sys
 import matplotlib.pyplot as plt
 import networkx as nx
 import pandas as pd
-import os
 import database as db
 import output as out
 from typing import Any, Dict, List, Set, Tuple, Iterator, Callable, Optional
@@ -197,3 +198,25 @@ def gen_CAD_plots(
             plt.close()
         else:
             plt.show()
+
+def find_db_files(directory):
+    dbs_list = []
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            if file.endswith('.db'):
+                dbs_list.append((root, file))
+    return dbs_list
+
+def main():
+    target_directory = sys.argv[1]
+    dbs_list = find_db_files(target_directory)
+    for db_loc, db_name in dbs_list:
+        print(f"Preparing Pop Plots for {db_name} in {db_loc}")
+        pplot = PopulationPlot(db_loc, db_name)
+        pplot.plot()
+        print(f"Preparing Model Vars Plots for {db_name} in {db_loc}")
+        mvplot = ModelVarsPlot(db_loc, db_name)
+        mvplot.plot()
+
+if __name__ == "__main__":
+    main()
