@@ -116,15 +116,18 @@ class ModelVarsPlot(BasePlot):
             name = column.replace('_', ' ').title()
             for n in nd:
                 title = f"{name} Over Time\n Network {n}"
-                df[nd[n]].ewm(span=100).mean().plot(
-                    title=title,
-                    xlabel="Step",
-                    ylabel=name,
-                    figsize=(19.2, 9.66),
-                )
-                plt.tight_layout()
-                plt.savefig(f"{self.plot_dir}/{column}_{n}.png")
-                plt.close()
+                try:
+                    df[nd[n]].ewm(span=100).mean().plot(
+                        title=title,
+                        xlabel="Step",
+                        ylabel=name,
+                        figsize=(19.2, 9.66),
+                    )
+                    plt.tight_layout()
+                    plt.savefig(f"{self.plot_dir}/{column}_{n}.png")
+                    plt.close()
+                except KeyError as e:
+                    print(e)
 
 def activity(df: pd.DataFrame, pivot: Callable) -> pd.DataFrame:
     return df.pipe(pivot).notna().cumsum()
