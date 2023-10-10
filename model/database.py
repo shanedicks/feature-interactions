@@ -440,7 +440,7 @@ def get_phenotypes_df(
         if type(phenotypes) is tuple:
             conditions.append(f"phenotype in {phenotypes}")
         else:
-            conditions.append(f"phenotype = {phenotypes}")
+            conditions.append(f"phenotype = '{phenotypes}'")
     where = " AND ".join(conditions)
     sql = f"""SELECT {', '.join(columns)}
               FROM phenotypes
