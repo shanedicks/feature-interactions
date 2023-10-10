@@ -55,6 +55,8 @@ class PopulationPlot(BasePlot):
                 if not ph_df.empty:
                     m = ph_df.groupby('phenotype')['pop'].sum()
                     phenotypes = tuple(m.nlargest(1000).index)
+                    if len(phenotypes) == 1:
+                        phenotypes = phenotypes[0]
                     ph_df = db.get_phenotypes_df(self.db_path, shadow, worlds=w, phenotypes=phenotypes)
                     self.save_pivot_fig(ph_df, self.phenotype_pivot, shadow, w, n)
                     role_column(ph_df)
