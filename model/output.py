@@ -7,11 +7,10 @@ from collections import Counter
 from itertools import chain, combinations
 from math import comb, log2
 from statistics import mean, median, quantiles
-from typing import Any, Dict, List, Set, Tuple, Iterator, Callable
+from typing import Any, Dict, List, Set, Tuple, Iterator, Callable, Union
 
 SpacetimeDict = Dict[Tuple[int, int], int]
 RowDict = Dict[str, List[Dict[str, Any]]]
-
 
 
 # Control
@@ -218,27 +217,6 @@ def occupied_phenotypes_list(model: "Model"):
 
 
 # Graphics - based on World objects - need reworking to draw from db
-def draw_feature_interactions(world: "World") -> None:
-    g = world.feature_interactions
-    pos = nx.circular_layout(g)
-    labels = {n: n.name for n in pos.keys()}
-    nx.draw_networkx_nodes(g, pos, nodelist=world.get_features_list(env=False), node_color="tab:blue")
-    nx.draw_networkx_nodes(g, pos, nodelist=world.get_features_list(env=True), node_color="tab:green")
-    nx.draw_networkx_edges(g, pos)
-    nx.draw_networkx_labels(g, pos, labels)
-    plt.show()
-
-def draw_role_network(site: "Site") -> None:
-    g = site.roles_network
-    pos = nx.circular_layout(g)
-    labels = {n: n.__repr__() for n in pos.keys()}
-    env_nodes = [f for f in site.traits.keys()]
-    role_nodes = [n for n in g.nodes() if n not in env_nodes]
-    nx.draw_networkx_nodes(g, pos, nodelist=env_nodes, node_color="tab:green")
-    nx.draw_networkx_nodes(g, pos, nodelist=role_nodes, node_color="tab:blue")
-    nx.draw_networkx_edges(g, pos)
-    nx.draw_networkx_labels(g, pos, labels)
-    plt.show()
 
 def draw_utility_hist(world: "World") -> None:
     agent_fitness = [a.utils for a in world.schedule.agents]
@@ -255,7 +233,9 @@ def draw_age_hist(world: "World") -> None:
     plt.hist(ages)
     plt.show()
 
+
 # Previously Site methods or based on Site objects - need reworking to handle input from Phenotypes db
+class Site_Dummy:
 
     def get_local_features_dict(self):
         lfd = {}
@@ -273,7 +253,7 @@ def draw_age_hist(world: "World") -> None:
     def env_feature_weight(
             self,
             feature: "Feature",
-            lfd: Lfd = None
+            lfd: "Local Features Dict" = None
         ) -> Union[int, float]:
         # Get the chance of initiating an interaction against Feature for an agent at a given site
         if lfd is None:

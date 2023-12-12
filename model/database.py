@@ -353,6 +353,9 @@ def get_df(db_path: str, sql: str, dtype: Optional[Dict[str, str]] = None) -> pd
     conn.close()
     return df
 
+def get_world_dict(db_path) -> Dict[int, int]:
+    return dict(get_params_df(db_path)[['world_id', 'network_id']].itertuples(index=False))
+
 def get_params_df(db_path: str) -> pd.DataFrame:
     columns = [
         "world_id",
@@ -413,6 +416,7 @@ def get_phenotypes_df(
     sites: bool = False,
     worlds: Optional[Union[List[int], int]] = None,
     phenotypes: Union[Tuple[str], str] = None,
+    steps: Union[Tuple[int], int] = None
     ) -> pd.DataFrame:
     columns = [
         "phenotype",
@@ -432,7 +436,7 @@ def get_phenotypes_df(
     else:
         groupby = " GROUP BY world_id, step_num, phenotype"
     if worlds is not None:
-        if type(worlds) is tuple:
+        if type(worlds) is list:
             conditions.append(f"world_id in {tuple(worlds)}")
         else:
             conditions.append(f"world_id = {worlds}")
@@ -441,6 +445,11 @@ def get_phenotypes_df(
             conditions.append(f"phenotype in {phenotypes}")
         else:
             conditions.append(f"phenotype = '{phenotypes}'")
+    if steps is not None:
+        if type(steps) is tuple:
+            conditions.append(f"step_num in {steps}")
+        else:
+            conditions.append(f"step_num = '{steps}'")
     where = " AND ".join(conditions)
     sql = f"""SELECT {', '.join(columns)}
               FROM phenotypes
@@ -449,6 +458,27 @@ def get_phenotypes_df(
               WHERE {where}{groupby};"""
     return get_df(db_path, sql, dtype=dtype)
 
-def get_world_dict(db_path) -> Dict[int, int]:
-    return dict(get_params_df(db_path)[['world_id', 'network_id']].itertuples(index=False))
+def get_feature_changes_df(
+        db_path: str,
+    ) -> pd.DataFrame:
+    sql = """SELECT world_id, step_num, FC.feature_id, name, env, change
+             FROM feature_changes AS FC
+             JOIN features AS F ON F.feature_id = FC.feature_id
+             JOIN spacetime AS S ON S.spacetime_id = FC.spacetime_id;
+    """
+    return get_df(db_path, sql)
 
+def get_interactions_df(
+        db_path: str,
+    ) -> pd.DataFrame:
+    sql = """SELECT interaction_id,
+                    interactions.network_id,
+                    I.name AS initiator,
+                    T.name AS target,
+                    i_anchor,
+                    t_anchor
+             FROM interactions
+             JOIN features AS I ON I.feature_id = interactions.initiator
+             JOIN features AS T ON T.feature_id = interactions.target
+    """
+    return get_df(db_path, sql)
