@@ -356,6 +356,42 @@ def get_df(db_path: str, sql: str, dtype: Optional[Dict[str, str]] = None) -> pd
 def get_world_dict(db_path) -> Dict[int, int]:
     return dict(get_params_df(db_path)[['world_id', 'network_id']].itertuples(index=False))
 
+def get_sites_dict(db_path) -> Dict[int, Dict[Tuple[int, int], List[str]]]:
+    sql = """
+        SELECT 
+            spacetime.site_pos,
+            spacetime.world_id,
+            traits.name AS trait_name,
+            features.name AS feature_name
+        FROM 
+            environment
+        JOIN 
+            spacetime ON environment.spacetime_id = spacetime.spacetime_id
+        JOIN 
+            traits ON environment.trait_id = traits.trait_id
+        JOIN 
+            features ON traits.feature_id = features.feature_id
+        GROUP BY
+            spacetime.site_pos, spacetime.world_id, traits.name, features.name;
+    """
+
+    df = get_df(db_path, sql)
+    sites_dict = {}
+
+    for index, row in df.iterrows():
+        world = row['world_id']
+        site = row['site_pos']
+        feature_trait = f"{row['feature_name']}.{row['trait_name']}"
+
+        if world not in sites_dict:
+            sites_dict[world] = {}
+
+        if site not in sites_dict[world]:
+            sites_dict[world][site] = []
+
+        sites_dict[world][site].append(feature_trait)
+    return sites_dict
+
 def get_params_df(db_path: str) -> pd.DataFrame:
     columns = [
         "world_id",
@@ -413,11 +449,21 @@ def get_model_vars_df(db_path: str) -> pd.DataFrame:
 def get_phenotypes_df(
     db_path: str,
     shadow: bool,
-    sites: bool = False,
-    worlds: Optional[Union[List[int], int]] = None,
+    sites: [Union[Tuple[int], int]] = None,
+    worlds: [Union[Tuple[int], int]] = None,
     phenotypes: Union[Tuple[str], str] = None,
     steps: Union[Tuple[int], int] = None
     ) -> pd.DataFrame:
+    arg_names = [
+        (worlds, 'worlds'),
+        (phenotypes, 'phenotypes'),
+        (steps, 'steps'),
+        (sites, 'sites')
+    ]
+    for arg, name in arg_names:
+        if isinstance(arg, list):
+            raise TypeError(f"A list was passed to '{name}'. Please pass a tuple or a single value instead.")
+
     columns = [
         "phenotype",
         "SUM(pop) as pop",
@@ -428,25 +474,28 @@ def get_phenotypes_df(
         'phenotype': 'category',
     }
     conditions = [f"shadow = {int(shadow)}"]
-    if sites:
-        columns.append("site_pos")
+    groupby = " GROUP BY world_id, step_num, phenotype"
+    if sites is not None:
         columns[1] = "pop"
-        groupby = ""
+        columns.append("site_pos")
         dtype['site_pos'] = 'category'
-    else:
-        groupby = " GROUP BY world_id, step_num, phenotype"
+        groupby = ""
+        if isinstance(sites, tuple):
+            conditions.append(f"site_pos in {sites}")
+        else:
+            conditions.append(f"site_pos = '{sites}'")
     if worlds is not None:
-        if type(worlds) is list:
+        if isinstance(worlds, tuple):
             conditions.append(f"world_id in {tuple(worlds)}")
         else:
             conditions.append(f"world_id = {worlds}")
     if phenotypes is not None:
-        if type(phenotypes) is tuple:
+        if isinstance(phenotypes, tuple):
             conditions.append(f"phenotype in {phenotypes}")
         else:
             conditions.append(f"phenotype = '{phenotypes}'")
     if steps is not None:
-        if type(steps) is tuple:
+        if isinstance(steps, tuple):
             conditions.append(f"step_num in {steps}")
         else:
             conditions.append(f"step_num = '{steps}'")
@@ -456,7 +505,9 @@ def get_phenotypes_df(
               JOIN spacetime
               ON phenotypes.spacetime_id = spacetime.spacetime_id
               WHERE {where}{groupby};"""
-    return get_df(db_path, sql, dtype=dtype)
+    df = get_df(db_path, sql, dtype=dtype)
+    df['role'] = pd.Categorical(df['phenotype'].str.replace('([.a-z])', '', regex=True))
+    return df
 
 def get_feature_changes_df(
         db_path: str,
