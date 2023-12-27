@@ -673,7 +673,8 @@ def main():
     target_directory = config['target_directory']
     dbs_list = [(config, l, n) for l,n in find_db_files(target_directory)]
     num_processes = os.environ.get('SLURM_CPUS_PER_TASK', None)
-    num_processes = int(num_processes) if num_processes
+    if num_processes:
+        num_processes = int(num_processes)
     with tqdm(total=len(dbs_list), desc="Databases Pool") as progress:
         with Pool(num_processes) as pool:
             for result in pool.imap_unordered(run_analysis_from_config, dbs_list):
