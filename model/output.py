@@ -99,7 +99,7 @@ def get_sites_rows(
         row = (st_id, site.get_pop(), site.born, site.died, site.moved_in, site.moved_out)
         rd['demographics'].append(row)
         for k, v in site.utils.items():
-            row = (st_id, k.trait_ids[site.traits[k]], round(v, 2))
+            row = (st_id, int(k.trait_ids[site.traits[k]]), round(v, 2))
             rd['environment'].append(row)
 
 # Descriptives

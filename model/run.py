@@ -37,10 +37,14 @@ class Controller():
         path_to_db: str,
         data_interval = None,
         db_interval = None,
+        db_manager = None,
         features_network = None,
     ) -> None:
         self.experiment_name = experiment_name
-        self.db_manager = self.get_db_manager(path_to_db)
+        if db_manager:
+            self.db_manager = db_manager
+        else:
+            self.db_manager = self.get_db_manager(path_to_db)
         self.data_interval = 1 if not data_interval else data_interval
         self.db_interval = 1 if not db_interval else db_interval
         self.features_network = features_network
