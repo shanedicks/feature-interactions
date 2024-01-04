@@ -108,10 +108,7 @@ class Agent(Agent):
         # Increment the count of the agent's phenotype at its current position.
         pd = self.role.types[self.pos]
         # Handle the addition of phenotype count, creating a new entry if it doesn't exist.
-        try:
-            pd[self.phenotype] += 1
-        except KeyError:
-            pd[self.phenotype] = 1
+        pd[self.phenotype] = pd.get(self.phenotype, 0) + 1
 
         # For non-shadow agents, increment the count of each trait at the current position.
         if not self.shadow:
@@ -119,12 +116,7 @@ class Agent(Agent):
                 trait = self.traits[feature]
                 td = feature.traits_dict[self.pos]
                 # Update trait count, initializing if necessary.
-                if trait not in td:
-                    td[trait] = 0
-                try:
-                    td[trait] += 1
-                except KeyError:
-                    td[trait] = 1
+                td[trait] = td.get(trait, 0) + 1
 
     def decrement_phenotype(self):
         # Decrement the count of the agent's phenotype at its current position.
