@@ -158,17 +158,17 @@ class Agent(Agent):
         return self.random.choice(shadow_site.agents)  # Randomly choose and return a shadow agent.
 
     def get_agent_target(self) -> Union[Agent, None]:
-        # Select a target agent based on target features and utility considerations.
-        target_features = self.role.target_features  # Retrieve target features for the agent's role.
-        if len(target_features) > 0:
+        # Select a target agent based on role and utility considerations.
+        target_roles = self.role.neighbors['targets']  # Retrieve targets for the agent's role.
+        if len(target_roles) > 0:
             n = self.model.target_sample  # Number of agents to sample as potential targets.
             def targetable(target):
                 # Define a function to identify if an agent is a suitable target.
-                return target.utils >= 0 and any(f in target.traits for f in target_features) and target is not self
+                return target.utils >= 0 and target.role in target_roles and target is not self
             # Filter the sampled agents and return the first suitable target, if any.
             return next(filter(targetable, self.site.agent_sample(n)), None)
         else:
-            return None  # Return None if there are no target features.
+            return None  # Return None if there are no target roles.
 
     def do_env_interactions(self) -> None:
         # Gather interactions where the agent is the initiator and the target is a trait in the site.
