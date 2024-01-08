@@ -133,10 +133,14 @@ def role_dist(model: "Model", site: Tuple[int, int] = None) -> Dict['Role', int]
     if site is None:
         sd = model.sites
         for r in model.roles_dict.values():
-            type_dist = [v for s in sd for v in r.types[s].values() if v > 0]
-            total = sum(type_dist)
-            shannon = round(-sum([(v/total)*log2(v/total) for v in type_dist]), 2)
-            d[r] = (shannon, len(set(type_dist)), total)
+            type_dist = {}
+            for s in sd:
+                for k, v in r.types[s].items():
+                    if v > 0:
+                        type_dist[k] = type_dist.get(k, 0) + v
+            total = sum(type_dist.values())
+            shannon = round(-sum([(v/total)*log2(v/total) for v in type_dist.values()]), 2)
+            d[r] = (shannon, len(type_dist.keys()), total)
     else:
         for r in model.roles_dict.values():
             type_dist = [v for v in r.types[site].values() if v > 0]
