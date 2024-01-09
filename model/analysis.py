@@ -203,7 +203,7 @@ class NetworkPlot(BasePlot):
             (interactions['target'].isin(existing_nodes))
         ].copy()
         filtered_interactions['edge_attr'] = [
-            {'i_anchor': i_anchor, 't_anchor': t_anchor}
+            {'i_anchor': float(i_anchor), 't_anchor': float(t_anchor)}
             for i_anchor, t_anchor in zip(
                 filtered_interactions['i_anchor'],
                 filtered_interactions['t_anchor']
