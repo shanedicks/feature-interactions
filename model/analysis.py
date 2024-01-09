@@ -239,6 +239,7 @@ class NetworkPlot(BasePlot):
                     interactions_subset
                 )
                 logging.info("Preparing json data")
+                validate_and_convert_floats(features_network)
                 network_json = nx.node_link_data(features_network)
                 networks_data[nid][wid] = network_json
         logging.info("Preparing to write json file")
@@ -390,6 +391,7 @@ class NetworkPlot(BasePlot):
                         interactions_subset
                     )
                     logging.info("Preparing json data")
+                    validate_and_convert_floats(role_network)
                     network_json = nx.node_link_data(role_network)
                     networks_data[nid][wid][site] = network_json
         logging.info("Preparing to write json file")
@@ -581,6 +583,17 @@ def gen_CAD_plots(
             plt.close()
         else:
             plt.show()
+
+def validate_and_convert_floats(G):
+    for _, node_data in G.nodes(data=True):
+        for key, value in node_data.items():
+            if isinstance(value, float):  # Check for float type (includes float32)
+                node_data[key] = float(value)  # Convert to standard Python float
+
+    for _, _, edge_data in G.edges(data=True):
+        for key, value in edge_data.items():
+            if isinstance(value, float):
+                edge_data[key] = float(value)
 
 def setup_logging(db_loc, db_name, job_name):
     process_id = os.getpid()
