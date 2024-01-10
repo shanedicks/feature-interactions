@@ -168,6 +168,8 @@ class NetworkPlot(BasePlot):
             for node in other_nodes:
                 x, y = new_positions[node]
                 pos[node] = (x, y + y_offset)
+        for node, (x, y) in pos.items():
+            pos[node] = (float(x), float(y))
         nx.set_node_attributes(G, pos, "pos")
 
     def construct_features_network(
