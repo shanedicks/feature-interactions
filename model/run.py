@@ -192,6 +192,8 @@ class Controller():
                                 if not world.running:
                                     world.database_update(override=True)
                                 progress.update()
+                                world.cleanup()
+                                self.world = None
 
     def run_mp(
         self,
@@ -289,6 +291,7 @@ class Controller():
                             world.step()
                         if not world.running:
                             world.database_update(override=True)
+                        world.cleanup()
 
 def main():
     with open(sys.argv[1], 'r') as f:

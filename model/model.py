@@ -32,6 +32,10 @@ class ListDict(object):
             self.agents[index] = last_agent
             self.agent_to_index[last_agent] = index
 
+    def clear(self):
+        self.agent_to_index.clear()
+        self.agents.clear()
+
     def __iter__(self):
         return iter(self.agents)
 
@@ -77,6 +81,10 @@ class ListDictMultiGrid(Grid):
             self[x][y].agents for x, y in cell_list if not self.is_cell_empty((x, y))
         )
 
+    def clear_grid(self):
+        for _, x, y in self.coord_iter():
+            self.grid[x][y].clear()
+
 
 class SampledActivation(BaseScheduler):
 
@@ -112,6 +120,9 @@ class SampledActivation(BaseScheduler):
         # Increment simulation steps and time.
         self.steps += 1
         self.time += 1
+
+    def clear_schedule(self):
+        self._agents.clear()
 
 
 class Shadow(Model):
@@ -168,6 +179,17 @@ class Shadow(Model):
     def agents(self) -> Iterator['Agent']:
         # Iterate over all agents in the Shadow model.
         return self.grid.iter_cell_list_contents([pos for pos in self.sites])
+
+    def cleanup(self):
+        # Clear collections inside complex objects
+        self.grid.clear_grid()
+        self.sites.clear()
+        self.roles_dict.clear()
+
+        # Remove references to complex objects and collections
+        self.grid = None
+        self.model = None
+        self.random = None
 
 
 class World(Model):
@@ -645,3 +667,25 @@ class World(Model):
         if self.schedule.get_agent_count() == 0:
             print("All the agents are dead... :(")
             self.running = False  # Stop the simulation.
+
+    def cleanup(self):
+        # Clear collections inside complex objects
+        self.schedule.clear_schedule()
+        self.grid.clear_grid()
+        self.shadow.cleanup()
+        self.feature_interactions.clear()
+
+        # Remove references to complex objects and collections
+        self.schedule = None
+        self.grid = None
+        self.shadow = None
+        self.feature_interactions = None
+
+        # Clear dictionaries and lists
+        self.sites.clear()
+        self.cached_payoffs.clear()
+        self.roles_dict.clear()
+        self.spacetime_dict.clear()
+        self.db_rows.clear()
+        self.network_dfs.clear()
+        self.db_ids.clear()
