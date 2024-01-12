@@ -678,11 +678,8 @@ class World(Model):
         for _, _, interaction in self.feature_interactions.edges(data='interaction'):
             interaction.cleanup()
 
-        # Remove all nodes and edges from the graph.
-        self.feature_interactions.clear()
-
         # Cleanup Roles, which are dependent on Features and Interactions.
-        for role in self.roles.values():
+        for role in self.roles_dict.values():
             role.cleanup()
 
         # Cleanup Agents and Sites, which are interdependent.
