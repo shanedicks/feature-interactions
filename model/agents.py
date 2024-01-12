@@ -73,6 +73,17 @@ class Site:
             num = pop  # Adjust the number to sample if it exceeds current population.
         return self.random.sample(self.agents, num)  # Randomly sample agents.
 
+    def cleanup(self):
+        # Clear the list of agents at this site to break references.
+        self.agents.clear()
+
+        # Nullify references to model and other objects.
+        self.model = None
+        self.random = None
+        self.pos = None
+        self.traits = None
+        self.utils = None
+
     def __repr__(self) -> str:
         return "Site {0}".format(self.pos)
 
@@ -381,6 +392,14 @@ class Agent(Agent):
             # Decide whether to move the agent based on utility change or a random chance.
             if self.utils == self.start - cost or self.random.random() < self.model.move_chance:
                 self.move()
+
+    def cleanup(self):
+        # Clear any internal structures and references.
+        self.site = None
+        self.role = None
+        self.traits = None
+        self.model = None
+        self.shadow = None
 
     def __repr__(self) -> str:
         return "Agent {}".format(self.unique_id)

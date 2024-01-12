@@ -109,7 +109,6 @@ class SampledActivation(BaseScheduler):
         # Determine agents to be removed based on a mortality rate.
         kill_list = [m.random.random() <= m.mortality for i in range(self.get_agent_count())]
         n = self.get_agent_count()  # Current agent count.
-        print(f"2% of {n} is {round(n * self.model.mortality)}")  # Log expected mortality count.
         killed = 0  # Counter for killed agents.
         # Remove agents based on the kill list and count them.
         for agent in itertools.compress(self.agents, kill_list):
@@ -181,11 +180,15 @@ class Shadow(Model):
         return self.grid.iter_cell_list_contents([pos for pos in self.sites])
 
     def cleanup(self):
-        # Clear collections inside complex objects
+        # Cleanup roles and sites
+        for role in self.roles_dict.values():
+            role.cleanup()
+        for site in self.sites.values():
+            site.cleanup()
+        # Clear collections
         self.grid.clear_grid()
         self.sites.clear()
         self.roles_dict.clear()
-
         # Remove references to complex objects and collections
         self.grid = None
         self.model = None
@@ -669,17 +672,30 @@ class World(Model):
             self.running = False  # Stop the simulation.
 
     def cleanup(self):
+        # Cleanup Features and Interactions stored in the nx.DiGraph.
+        for feature in self.feature_interactions.nodes():
+            feature.cleanup()
+        for _, _, interaction in self.feature_interactions.edges(data='interaction'):
+            interaction.cleanup()
+
+        # Remove all nodes and edges from the graph.
+        self.feature_interactions.clear()
+
+        # Cleanup Roles, which are dependent on Features and Interactions.
+        for role in self.roles.values():
+            role.cleanup()
+
+        # Cleanup Agents and Sites, which are interdependent.
+        for agent in self.schedule.agents:
+            agent.cleanup()
+        for site in self.sites.values():
+            site.cleanup()
+
         # Clear collections inside complex objects
         self.schedule.clear_schedule()
         self.grid.clear_grid()
         self.shadow.cleanup()
         self.feature_interactions.clear()
-
-        # Remove references to complex objects and collections
-        self.schedule = None
-        self.grid = None
-        self.shadow = None
-        self.feature_interactions = None
 
         # Clear dictionaries and lists
         self.sites.clear()
@@ -689,3 +705,9 @@ class World(Model):
         self.db_rows.clear()
         self.network_dfs.clear()
         self.db_ids.clear()
+
+        # Remove references to complex objects and collections
+        self.schedule = None
+        self.grid = None
+        self.shadow = None
+        self.feature_interactions = None

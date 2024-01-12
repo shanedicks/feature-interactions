@@ -230,6 +230,14 @@ class Feature:
         for trait in prunable:
             self.remove_trait(trait)
 
+    def cleanup(self):
+        # Clear internal structures and references
+        self.model = None
+        self.values.clear()
+        self.empty_traits.clear()
+        self.trait_ids.clear()
+        self.traits_dict.clear()
+
     def __repr__(self) -> str:
         return self.name
 
@@ -342,6 +350,13 @@ class Interaction:
         assert t <= 1.0 and t >= -1.0
         return (i, t)
 
+    def cleanup(self):
+        # Clear internal structures and references
+        self.model = None
+        self.initiator = None
+        self.target = None
+        self.payoffs.clear()
+
     def __repr__(self) -> str:
         return "{0}→{1}".format(
             self.initiator.name, 
@@ -405,6 +420,14 @@ class Role:
         # Update the interactions and neighbors dictionaries
         self.interactions = self.get_interactions()
         self.neighbors = self.get_neighbors()
+
+    def cleanup(self):
+        # Clear internal structures and references
+        self.model = None
+        self.features.clear()
+        self.interactions.clear()
+        self.neighbors.clear()
+        self.types.clear()
 
     def __repr__(self) -> str:
         return self.rolename
