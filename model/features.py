@@ -424,7 +424,7 @@ class Role:
     def cleanup(self):
         # Clear internal structures and references
         self.model = None
-        self.features.clear()
+        self.features = None
         self.interactions.clear()
         self.neighbors.clear()
         self.types.clear()
