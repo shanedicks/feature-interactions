@@ -292,7 +292,9 @@ class World(Model):
         # Create a Shadow model mirroring the World model.
         self.shadow = Shadow(model=self)
         self.running = True  # Set the model to running state.
+        self.print_report()
 
+    def print_report(self):
         # Print initial reports for the environment, roles distribution, and interactions.
         print("Environment -------------------")
         env_report(self)
@@ -649,7 +651,7 @@ class World(Model):
 
         # Print a status report including time, network ID, world ID, and agent count.
         print(
-            "N:{1}/{5}, W:{3}/{4} id={2}, Step:{0}/{6}, Pop:{7}".format(
+            "N:{1}/{5}, W:{3}/{4} id={2}, Step:{0}/{6}, Pop:{7}, Payoffs: {8}-cached {9}-new".format(
                 self.schedule.time,
                 self.network_id,
                 self.world_id,
@@ -657,10 +659,13 @@ class World(Model):
                 self.controller.network_worlds,
                 self.controller.total_networks,
                 self.controller.max_steps,
-                self.schedule.get_agent_count()
+                self.schedule.get_agent_count(),
+                self.cached,
+                self.new,
             )
         )
-        print(role_dist(self))  # Print the distribution of roles in the model.
+        if self.schedule.time % 20 == 0:
+            self.print_report()
 
         self.prune_features()  # Remove inactive features from the model.
         self.database_update()  # Update the database with the current state of the model.
