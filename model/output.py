@@ -72,7 +72,9 @@ def get_model_vars_row(
         get_median_utility(world, utils),
         get_num_phenotypes(world),
         get_num_roles(world),
-        get_num_agent_features(world)
+        get_num_agent_features(world),
+        world.new + world.cached,
+        world.env
     )
     rd['model_vars'].append(row)
 

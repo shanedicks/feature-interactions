@@ -141,7 +141,9 @@ class Manager():
                 med_utility   REAL NOT NULL,
                 num_types     INTEGER NOT NULL,
                 num_roles     INTEGER NOT NULL,
-                num_features  INTEGER NOT NULL
+                num_features  INTEGER NOT NULL,
+                agent_int     INTEGER NOT NULL,
+                env_int       INTEGER NOT NULL
             )"""
         phenotypes_table = """
             CREATE TABLE IF NOT EXISTS phenotypes (
@@ -429,18 +431,7 @@ def get_params_df(db_path: str) -> pd.DataFrame:
     return get_df(db_path, sql)
 
 def get_model_vars_df(db_path: str) -> pd.DataFrame:
-    columns = [
-        "pop",
-        "total_utility",
-        "mean_utility",
-        "med_utility",
-        "num_types",
-        "num_roles",
-        "num_features",
-        "world_id",
-        "step_num"
-    ]
-    sql = f"""SELECT {', '.join(columns)}
+    sql = f"""SELECT *
               FROM model_vars
               JOIN spacetime
               ON model_vars.spacetime_id = spacetime.spacetime_id;"""

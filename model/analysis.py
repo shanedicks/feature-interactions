@@ -109,9 +109,23 @@ class ModelVarsPlot(BasePlot):
             for i in self.world_dict.values()
         }
         mv_df = db.get_model_vars_df(self.db_path)
-        for column in mv_df.columns[:7]:
-            df = mv_df.pivot(index='step_num', columns='world_id', values=column).fillna(0)
-            name = column.replace('_', ' ').title()
+        plot_columns = [
+            ("Population", "pop"),
+            ("Agent Total Utility", "total_utility"),
+            ("Agent Mean Utility", "mean_utility"),
+            ("Agent Median Utility", "med_utility"),
+            ("Number of Phenotypes", "num_types"),
+            ("Number of Roles", "num_roles"),
+            ("Number of Features", "num_features"),
+            ("Agent/Agent Interactions", "agent_int"),
+            ("Agent/Environment Interactions", "env_int"),
+    ]
+        for name, column in plot_columns:
+            try:
+                df = mv_df.pivot(index='step_num', columns='world_id', values=column).fillna(0)
+            except KeyError as e:
+                logging.error(e)
+                continue
             for n in nd:
                 title = f"{name} Over Time\n Network {n}"
                 try:
@@ -126,6 +140,7 @@ class ModelVarsPlot(BasePlot):
                     plt.close()
                 except KeyError as e:
                     logging.error(e)
+                    continue
 
 
 class NetworkPlot(BasePlot):
