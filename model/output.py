@@ -190,9 +190,14 @@ def get_role_by_name(world: "World", name: str):
     return world.roles_dict.get(frozenset(f), None)
 
 def payoff_quantiles(interaction: "Interaction"):
-    i = [p[0] for item in interaction.payoffs.values() for p in item.values()]
-    t = [p[1] for item in interaction.payoffs.values() for p in item.values()]
-    return([round(q,2) for q in quantiles(i)], [round(q,2) for q in quantiles(t)])
+    payoffs = [p for item in interaction.payoffs.values() for p in item.values()]
+    count = len(payoffs)
+    i = [p[0] for p in payoffs]
+    t = [p[1] for p in payoffs]
+    if count > 2:
+        return(count, [round(q,2) for q in quantiles(i)], [round(q,2) for q in quantiles(t)])
+    else:
+        return(count, sorted(i), sorted(t))
 
 def print_matrix(interaction: "Interaction"):
     print(interaction)
@@ -206,7 +211,7 @@ def interaction_report(world: "World", full: bool = False):
         for i in interactions:
             print_matrix(i)
     else:
-        print("Interaction, ([initiator payoff quantiles], [Target payoff quantiles])")
+        print("Interaction, Payoffs, ([initiator quantiles], [target quantiles])")
         for i in interactions:
             print(i, payoff_quantiles(i))
 

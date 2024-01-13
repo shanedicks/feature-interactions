@@ -187,6 +187,7 @@ class Agent(Agent):
         for i in interactions:
             # Check if both the site and the agent have positive utility values.
             if self.site.utils[i.target] > 0 and self.utils >= 0:
+                self.model.env += 1 #Increment env interactions count
                 # Get the initiator and target values for the interaction.
                 i_value = self.traits[i.initiator]
                 t_value = self.site.traits[i.target]

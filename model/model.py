@@ -604,8 +604,6 @@ class World(Model):
     def database_update(self, override: bool = False) -> None:
         # Collect data at regular intervals or if override is True.
         if self.schedule.time % self.controller.data_interval == 0 or override:
-            print("Recording")  # Log the start of the recording process.
-
             # Retrieve spacetime dictionary and database rows dictionary.
             sd = self.spacetime_dict
             rd = self.db_rows
@@ -633,6 +631,7 @@ class World(Model):
 
     def step(self):
         # Perform a single step in the simulation.
+        self.env = 0 # Reset the count of env payoffs
         self.new = 0  # Reset the count of new payoffs.
         self.cached = 0  # Reset the count of cached payoffs.
 
@@ -652,7 +651,7 @@ class World(Model):
 
         # Print a status report including time, network ID, world ID, and agent count.
         print(
-            "N:{1}/{5}, W:{3}/{4} id={2}, Step:{0}/{6}, Pop:{7}, Payoffs: {8}-cached {9}-new".format(
+            "N:{1}/{5}, W:{3}/{4} id={2}, Step:{0}/{6}, Pop:{7}, Payoffs: {8}-cached {9}-new {10}-env".format(
                 self.schedule.time,
                 self.network_id,
                 self.world_id,
@@ -663,11 +662,11 @@ class World(Model):
                 self.schedule.get_agent_count(),
                 self.cached,
                 self.new,
+                self.env
             )
         )
         if self.schedule.time % 20 == 0:
             self.print_report()
-
         self.prune_features()  # Remove inactive features from the model.
         self.database_update()  # Update the database with the current state of the model.
         self.spacetime_dict = self.get_spacetime_dict()  # Update the spacetime dictionary.
