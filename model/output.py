@@ -168,6 +168,7 @@ def phenotype_dist(model: "Model", site: Tuple[int, int] = None) -> Dict[str, in
     return {k:v for k,v in d.items() if v > 0}
 
 def env_report(world: "World"):
+    print("Pos, Pop, Pop change, Cost, Utils")
     for s in world.sites.values():
         pop = len(world.grid.get_cell_list_contents(s.pos))
         utils = {k: round(v, 2) for k, v in s.utils.items()}
@@ -205,6 +206,7 @@ def interaction_report(world: "World", full: bool = False):
         for i in interactions:
             print_matrix(i)
     else:
+        print("Interaction, ([initiator payoff quantiles], [Target payoff quantiles])")
         for i in interactions:
             print(i, payoff_quantiles(i))
 

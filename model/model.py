@@ -299,6 +299,7 @@ class World(Model):
         print("Environment -------------------")
         env_report(self)
         print("Roles Distribution ------------")
+        print("Role, [Entropy, Types, Pop]")
         print(role_dist(self))
         print("Interaction Report ------------")
         interaction_report(self)
