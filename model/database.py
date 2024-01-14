@@ -329,18 +329,23 @@ class Manager():
         i_traits: List[str],
         t_traits: List[str]
     ) -> List[Dict[str, Any]]:
+        # Get stored interaction payoffs
         p_df = world.network_dfs['payoffs']
-        p_df = p_df[p_df.interaction_id==interaction_id]
+        p_df = p_df.query('interaction_id == @interaction_id')
         p_df = p_df.drop(columns=['interaction_id'])
+        # Get names for relevant traits
         t_df = world.network_dfs['traits']
-        t_df = t_df[t_df.trait_id.isin(pd.concat([p_df.initiator, p_df.target]))]
-        df = p_df.replace(t_df.set_index('trait_id')['name'])
-        df = df[(df.initiator.isin(i_traits) & df.target.isin(t_traits))]
-        df = df.rename(
-            columns={'initiator_utils': 'i_utils', 'target_utils': 't_utils'}
-        )
-        return [dict(row) for i, row in df.iterrows()]
-
+        relevant_trait_ids = pd.concat([p_df.initiator, p_df.target]).unique()
+        t_df = t_df[t_df.trait_id.isin(relevant_trait_ids)]
+        t_df.set_index('trait_id', inplace=True) # Prepare for joins
+        t_df_names = t_df[['name']]
+        # Replace initiator and target trait ids with names
+        p_df = p_df.join(t_df_names, on='initiator').rename(columns={'name': 'initiator'})
+        p_df = p_df.join(t_df_names, on='target').rename(columns={'name': 'target'})
+        # Filter by i_traits and t_traits parameters
+        p_df = p_df.query('initiator in @i_traits and target in @t_traits')
+        p_df = p_df.rename(columns={'initiator_utils': 'i_utils', 'target_utils': 't_utils'})
+        return p_df.to_dict('records')
 
 #Database Output
 def get_connection(db_path: str) -> sqlite3.Connection:
