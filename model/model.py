@@ -598,7 +598,8 @@ class World(Model):
             'phenotypes': [],
             'demographics': [],
             'environment': [],
-            'spacetime': []
+            'spacetime': [],
+            'interaction_stats': []
         }
 
     def database_update(self, override: bool = False) -> None:
@@ -665,11 +666,11 @@ class World(Model):
                 self.env
             )
         )
-        if self.schedule.time % 20 == 0:
-            self.print_report()
         self.prune_features()  # Remove inactive features from the model.
         self.database_update()  # Update the database with the current state of the model.
         self.spacetime_dict = self.get_spacetime_dict()  # Update the spacetime dictionary.
+        if self.schedule.time % 20 == 0: # More detailed status reports
+            self.print_report()
 
         # Check if all agents are dead and end the simulation if so.
         if self.schedule.get_agent_count() == 0:

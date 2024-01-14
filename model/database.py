@@ -71,7 +71,8 @@ class Manager():
         payoffs_table = """
             CREATE TABLE IF NOT EXISTS payoffs (
                 payoff_id       INTEGER PRIMARY KEY,
-                interaction_id  INTEGER NOT NULL,
+                interaction_id  INTEGER NOT NULL
+                                    REFERENCES interactions (interaction_id),
                 initiator       INTEGER NOT NULL
                                     REFERENCES traits (trait_id),
                 target          INTEGER NOT NULL
@@ -130,6 +131,17 @@ class Manager():
                                      REFERENCES traits (trait_id),
                 change           TEXT NOT NULL
             )"""
+        interaction_stats_table = """
+            CREATE TABLE IF NOT EXISTS interaction_stats (
+                interaction_stats_id INTEGER PRIMARY KEY,
+                spacetime_id         INTEGER NOT NULL
+                                         REFERENCES spacetime (spacetime_id),
+                interaction_id       INTEGER NOT NULL
+                                         REFERENCES interactions (interaction_id),
+                num_interactions     INTEGER NOT NULL,
+                initiator_utils      REAL NOT NULL,
+                target_utils         REAL NOT NULL
+        )"""
         model_vars_table = """
             CREATE TABLE IF NOT EXISTS model_vars (
                 record_id     INTEGER PRIMARY KEY,
@@ -184,6 +196,7 @@ class Manager():
             spacetime_table,
             feature_changes_table,
             trait_changes_table,
+            interaction_stats_table,
             model_vars_table,
             phenotypes_table,
             demographics_table,
@@ -336,12 +349,14 @@ class Manager():
         # Get names for relevant traits
         t_df = world.network_dfs['traits']
         relevant_trait_ids = pd.concat([p_df.initiator, p_df.target]).unique()
-        t_df = t_df[t_df.trait_id.isin(relevant_trait_ids)]
+        t_df = t_df.query("trait_id in @relevant_trait_ids")
         t_df.set_index('trait_id', inplace=True) # Prepare for joins
         t_df_names = t_df[['name']]
         # Replace initiator and target trait ids with names
-        p_df = p_df.join(t_df_names, on='initiator').rename(columns={'name': 'initiator'})
-        p_df = p_df.join(t_df_names, on='target').rename(columns={'name': 'target'})
+        p_df = p_df.join(t_df_names, on='initiator').rename(columns={'name': 'i_name'})
+        p_df = p_df.join(t_df_names, on='target').rename(columns={'name': 't_name'})
+        p_df = p_df.drop(columns=['initiator', 'target'])
+        p_df = p_df.rename(columns={'i_name': 'initiator', 't_name': 'target'})    
         # Filter by i_traits and t_traits parameters
         p_df = p_df.query('initiator in @i_traits and target in @t_traits')
         p_df = p_df.rename(columns={'initiator_utils': 'i_utils', 'target_utils': 't_utils'})

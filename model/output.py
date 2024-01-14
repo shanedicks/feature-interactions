@@ -103,6 +103,10 @@ def get_sites_rows(
         for k, v in site.utils.items():
             row = (st_id, int(k.trait_ids[site.traits[k]]), round(v, 2))
             rd['environment'].append(row)
+        for db_id, stats in site.interaction_stats.items():
+            count, i_utils, t_utils = stats
+            row = (st_id, db_id, count, i_utils, t_utils)
+            rd['interaction_stats'].append(row)
 
 # Descriptives
 def env_features_dist(world: "World"):

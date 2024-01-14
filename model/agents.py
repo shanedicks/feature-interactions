@@ -1,3 +1,4 @@
+from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Union, Iterator
 from random import Random
 from mesa import Agent
@@ -25,6 +26,7 @@ class Site:
         self.moved_in = 0
         self.moved_out = 0
         self.utils = {}
+        self.interaction_stats = defaultdict(lambda: [0, 0, 0])
 
         # Access agents currently at this site.
         x, y = self.pos
@@ -60,6 +62,7 @@ class Site:
         self.died = 0
         self.moved_in = 0
         self.moved_out = 0
+        self.interaction_stats.clear()
         # Reset utility values for each feature to base environmental utilities.
         for feature in self.utils:
             self.utils[feature] = self.model.base_env_utils
@@ -184,6 +187,7 @@ class Agent(Agent):
             self.random.shuffle(interactions)
 
         # Process each interaction.
+        stats = []
         for i in interactions:
             # Check if both the site and the agent have positive utility values.
             if self.site.utils[i.target] > 0 and self.utils >= 0:
@@ -192,13 +196,15 @@ class Agent(Agent):
                 i_value = self.traits[i.initiator]
                 t_value = self.site.traits[i.target]
                 # Calculate the payoff for the interaction.
-                payoff = i.payoffs[i_value][t_value]
+                i_utils, t_utils = i.payoffs[i_value][t_value]
                 # Update the utilities of the agent and the site based on the payoff.
-                self.utils += payoff[0]
-                self.site.utils[i.target] += payoff[1]
+                self.utils += i_utils
+                self.site.utils[i.target] += t_utils
+                stats.append((int(i.db_id), i_utils, t_utils))
             # Stop processing if the agent's utility becomes negative.
             elif self.utils < 0:
                 break
+        self.update_interaction_stats(stats)
 
     def do_agent_interactions(self, initiator: Agent, target: Agent) -> Tuple[float, float]:
         # Determine the relevant interactions based on whether the agent is the initiator or target.
@@ -212,63 +218,78 @@ class Agent(Agent):
         i_payoff, t_payoff = 0, 0  # Initialize payoffs for initiator and target.
 
         # Calculate and aggregate payoffs from all relevant interactions.
+        stats = []
         for i in interactions:
             # Determine the initiator and target values for the interaction.
             i_value = initiator.traits[i.initiator]
             t_value = target.traits[i.target]
             # Calculate the payoff for the interaction.
-            payoff = i.payoffs[i_value][t_value]
+            i_utils, t_utils = i.payoffs[i_value][t_value]
+            stats.append((int(i.db_id), i_utils, t_utils))
             # Sum up the payoffs for the initiator and target.
-            i_payoff += payoff[0]
-            t_payoff += payoff[1]
+            i_payoff += i_utils
+            t_payoff += t_utils
 
-        return (i_payoff, t_payoff)  # Return the cumulative payoffs for initiator and target.
+        return (i_payoff, t_payoff, stats)  # Return the cumulative payoffs for initiator and target.
+
+    def update_interaction_stats(self, interaction_stats):
+        for db_id, i_utils, t_utils in interaction_stats:
+            self.site.interaction_stats[db_id][0] += 1 #increment interaction count
+            self.site.interaction_stats[db_id][1] += i_utils #increment initiator utils
+            self.site.interaction_stats[db_id][2] += t_utils #increment target utils
+
+    def handle_cached_target(self, agent_target, cache_result):
+        self.model.cached += 1  # Increment cached interactions count.
+        self_payoff, agent_payoff, interaction_stats = cache_result
+        self.update_interaction_stats(interaction_stats)
+        # Update utilities for both agents based on cached payoffs.
+        self.utils += self_payoff
+        agent_target.utils += agent_payoff
+
+    def handle_new_target(self, agent_target, cache):
+        # Calculate payoffs and collect interactions stats if not cached, including interactions in both directions.
+        self_payoff, agent_payoff = 0, 0
+        all_stats = []
+        initiator_payoff, target_payoff, stats = self.do_agent_interactions(self, agent_target)
+        self_payoff += initiator_payoff
+        agent_payoff += target_payoff
+        all_stats.extend(stats)
+        initiator_payoff, target_payoff, stats = self.do_agent_interactions(agent_target, self)
+        self_payoff += target_payoff
+        agent_payoff += initiator_payoff
+        all_stats.extend(stats)
+        interaction_stats = tuple(all_stats)
+        self.update_interaction_stats(interaction_stats)
+        # Update utilities for both agents based on new payoffs.
+        self.utils += self_payoff
+        agent_target.utils += agent_payoff
+        cache_value = (self_payoff, agent_payoff, interaction_stats)
+        self.model.new += 1  # Increment count of new payoffs calculated.
+        # Cache the newly calculated payoffs.
+        if self.phenotype not in cache:
+            cache[self.phenotype] = {}
+        cache[self.phenotype][agent_target.phenotype] = cache_value
 
     def interact(self) -> None:
         # Conduct environmental interactions for the agent.
         self.do_env_interactions()
 
         # If the agent still has non-negative utility, determine a target agent for interaction
-        agent = self.get_agent_target() if self.utils >= 0 else None
+        agent_target = self.get_agent_target() if self.utils >= 0 else None
         cache = self.model.cached_payoffs  # Access the model's payoff cache.
 
-        if agent is not None:
+        if agent_target is not None:
             try:
                 # Retrieve cached payoffs for interactions with the target phenotype.
-                payoffs = cache[self.phenotype][agent.phenotype]
-                self.model.cached += 1  # Increment cached interactions count.
-                # Update utilities for both agents based on cached payoffs.
-                self.utils += payoffs[0]
-                agent.utils += payoffs[1]
-                # Check if the target agent's utility falls below zero and process death if so.
-                if agent.utils < 0:
-                    agent.die()
+                cache_result = cache[self.phenotype][agent_target.phenotype]
+                self.handle_cached_target(agent_target, cache_result)
             except KeyError:
-                # Calculate payoffs if not cached, including interactions in both directions.
-                self_payoff, agent_payoff = 0, 0
-                results = self.do_agent_interactions(self, agent)
-                self_payoff += results[0]
-                agent_payoff += results[1]
-                results = self.do_agent_interactions(agent, self)
-                self_payoff += results[1]
-                agent_payoff += results[0]
-                # Update utilities for both agents based on new payoffs.
-                self.utils += self_payoff
-                agent.utils += agent_payoff
-                payoffs = (self_payoff, agent_payoff)
-                self.model.new += 1  # Increment count of new payoffs calculated.
-                # Cache the newly calculated payoffs.
-                if self.phenotype not in cache:
-                    cache[self.phenotype] = {}
-                cache[self.phenotype][agent.phenotype] = payoffs
-                # Kill target agent if its utility falls below zero.
-                if agent.utils < 0:
-                    agent.die()
+                self.handle_new_target(agent_target, cache)
+            # Kill target agent if its utility falls below zero.
+            if agent_target.utils < 0:
+                agent_target.die()
 
-    def reproduce(self) -> None:
-        # Reproduction logic, potentially mutating traits for the offspring.
-        child_traits = self.traits.copy()  # Copy parent traits to child.
-
+    def process_trait_mutation(self, child_traits):
         # Iterate over each feature for potential mutation.
         for feature in child_traits:
             # Check for trait mutation.
@@ -287,35 +308,44 @@ class Agent(Agent):
                         child_traits[feature] = self.random.choice(new_traits)
                     except IndexError:
                         pass
+        return child_traits
 
-        # Check for feature mutation.
-        if self.random.random() <= self.model.feature_mutate_chance:
-            # Determine whether to add a new feature or alter existing features, excluding shadow agents.
-            if self.random.random() <= self.model.feature_create_chance and not self.shadow:
-                feature = self.model.next_feature()
+    def process_feature_mutation(self, child_traits):
+        # Determine whether to add a new feature or alter existing features, excluding shadow agents.
+        if self.random.random() <= self.model.feature_create_chance and not self.shadow:
+            feature = self.model.next_feature()
+            child_traits[feature] = self.random.choice(feature.values)
+        else:
+            # Collect agent features not possessed by the child.
+            features = [
+                f for f in self.model.feature_interactions.nodes
+                if f.env is False and f not in child_traits
+            ]
+            # Add a new feature or remove an existing one.
+            if self.random.random() <= self.model.feature_gain_chance and len(features) > 0:
+                feature = self.random.choice(features)
                 child_traits[feature] = self.random.choice(feature.values)
-            else:
-                # Collect agent features not possessed by the child.
-                features = [
-                    f for f in self.model.feature_interactions.nodes
-                    if f.env is False and f not in child_traits
-                ]
-                # Add a new feature or remove an existing one.
-                if self.random.random() <= self.model.feature_gain_chance and len(features) > 0:
+            elif len(child_traits) > 0:
+                key = self.random.choice(list(child_traits.keys()))
+                del child_traits[key]
+                # Ensure shadow agents retain at least one feature.
+                if self.shadow and len(child_traits) == 0:
+                    features = [
+                        f for f in self.model.feature_interactions.nodes
+                        if f.env is False
+                    ]
                     feature = self.random.choice(features)
                     child_traits[feature] = self.random.choice(feature.values)
-                elif len(child_traits) > 0:
-                    key = self.random.choice(list(child_traits.keys()))
-                    del child_traits[key]
-                    # Ensure shadow agents retain at least one feature.
-                    if self.shadow and len(child_traits) == 0:
-                        features = [
-                            f for f in self.model.feature_interactions.nodes
-                            if f.env is False
-                        ]
-                        feature = self.random.choice(features)
-                        child_traits[feature] = self.random.choice(feature.values)
+        return child_traits
 
+
+    def reproduce(self) -> None:
+        # Reproduction logic, potentially mutating traits for the offspring.
+        child_traits = self.traits.copy()  # Copy parent traits to child.
+        child_traits = self.process_trait_mutation(child_traits)
+        # Check for feature mutation.
+        if self.random.random() <= self.model.feature_mutate_chance:
+            child_traits = self.process_feature_mutation(child_traits)
         # Create and place a new agent if there are traits to inherit or if it's a shadow agent.
         if len(child_traits) > 0 or self.shadow:
             new_agent = Agent(
