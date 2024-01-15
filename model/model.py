@@ -293,6 +293,8 @@ class World(Model):
         self.shadow = Shadow(model=self)
         self.running = True  # Set the model to running state.
         self.print_report()
+        for role in self.roles_dict.values():
+            role.update()
 
     def print_report(self):
         # Print initial reports for the environment, roles distribution, and interactions.
@@ -428,8 +430,9 @@ class World(Model):
                 # Update interactions for roles affected by the restored interaction.
                 affected_roles = [
                     role for role in self.roles_dict.values()
-                    if any(f in role.features for f in [initiator, target])
+                    if initiator in role.features or target in role.features
                 ]
+                print(interaction, affected_roles)
                 for role in affected_roles:
                     role.update()  # Update each affected role.
 
@@ -452,10 +455,11 @@ class World(Model):
             # Update interactions for roles affected by the new interaction.
             affected_roles = [
                 role for role in self.roles_dict.values()
-                if any(f in role.features for f in [initiator, target])
+                if initiator in role.features or target in role.features
             ]
+            print(interaction, affected_roles)
             for role in affected_roles:
-                role.interactions = role.get_interactions()  # Refresh interactions for each affected role.
+                role.update()  # Refresh interactions for each affected role.
 
     def remove_feature(self, feature: Feature) -> None:
         # Remove a specified feature from the model.

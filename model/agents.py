@@ -239,8 +239,8 @@ class Agent(Agent):
             self.site.interaction_stats[db_id][2] += t_utils #increment target utils
 
     def handle_cached_target(self, agent_target, cache_result):
-        self.model.cached += 1  # Increment cached interactions count.
         self_payoff, agent_payoff, interaction_stats = cache_result
+        self.model.cached += len(interaction_stats)  # Increment cached interactions count.
         self.update_interaction_stats(interaction_stats)
         # Update utilities for both agents based on cached payoffs.
         self.utils += self_payoff
@@ -259,12 +259,12 @@ class Agent(Agent):
         agent_payoff += initiator_payoff
         all_stats.extend(stats)
         interaction_stats = tuple(all_stats)
+        self.model.new += len(interaction_stats)  # Increment count of new payoffs calculated.
         self.update_interaction_stats(interaction_stats)
         # Update utilities for both agents based on new payoffs.
         self.utils += self_payoff
         agent_target.utils += agent_payoff
         cache_value = (self_payoff, agent_payoff, interaction_stats)
-        self.model.new += 1  # Increment count of new payoffs calculated.
         # Cache the newly calculated payoffs.
         if self.phenotype not in cache:
             cache[self.phenotype] = {}
