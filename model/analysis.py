@@ -9,7 +9,7 @@ import matplotlib.colors as mcolors
 import networkx as nx
 import pandas as pd
 import database as db
-import output as out
+import model.output as out
 from datetime import datetime
 from multiprocessing import Pool
 from typing import Any, Dict, List, Set, Tuple, Iterator, Callable, Optional

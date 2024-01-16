@@ -9,9 +9,9 @@ from functools import partial, reduce
 from multiprocessing import Pool
 from typing import Any, Dict, Iterable, List, Mapping, Union
 from tqdm import tqdm
-from model import World
-from features import Interaction
-from database import Manager
+from model.model import World
+from model.features import Interaction
+from model.database import Manager
 
 def get_param_set_list(
     params_dict: Mapping[str, Union[Any, Iterable[Any]]],

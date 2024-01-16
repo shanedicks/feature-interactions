@@ -2,8 +2,8 @@ from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Union, Iterator
 from random import Random
 from mesa import Agent
-from features import Role
-from output import *
+from model.features import Role
+from model.output import *
 
 
 class Site:
@@ -43,6 +43,7 @@ class Site:
                 self.utils[feature] = self.model.base_env_utils
         else:
             self.traits = traits  # Use provided traits if available.
+            self.utils = {k: 0.0 for k in self.traits.keys()}
 
     def get_pop(self) -> int:
         return len(self.agents)
@@ -62,6 +63,7 @@ class Site:
         self.died = 0
         self.moved_in = 0
         self.moved_out = 0
+        # Reset interaction_stats
         self.interaction_stats.clear()
         # Reset utility values for each feature to base environmental utilities.
         for feature in self.utils:

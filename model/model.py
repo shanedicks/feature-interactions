@@ -4,9 +4,9 @@ from typing import Any, Dict, Iterator, Iterable, List, Union
 from mesa import Model
 from mesa.space import accept_tuple_argument, Coordinate, Grid, GridContent
 from mesa.time import BaseScheduler
-from agents import Agent, Site
-from features import Feature, Interaction
-from output import *
+from model.agents import Agent, Site
+from model.features import Feature, Interaction
+from model.output import *
 
 
 class ListDict(object):
