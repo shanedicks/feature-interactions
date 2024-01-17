@@ -252,10 +252,12 @@ class Agent(Agent):
         # Calculate payoffs and collect interactions stats if not cached, including interactions in both directions.
         self_payoff, agent_payoff = 0, 0
         all_stats = []
+        # self as initiator
         initiator_payoff, target_payoff, stats = self.do_agent_interactions(self, agent_target)
         self_payoff += initiator_payoff
         agent_payoff += target_payoff
         all_stats.extend(stats)
+        # self as target
         initiator_payoff, target_payoff, stats = self.do_agent_interactions(agent_target, self)
         self_payoff += target_payoff
         agent_payoff += initiator_payoff
@@ -339,7 +341,6 @@ class Agent(Agent):
                     feature = self.random.choice(features)
                     child_traits[feature] = self.random.choice(feature.values)
         return child_traits
-
 
     def reproduce(self) -> None:
         # Reproduction logic, potentially mutating traits for the offspring.
