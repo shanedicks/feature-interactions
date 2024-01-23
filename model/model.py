@@ -161,7 +161,7 @@ class Shadow(Model):
         # Reset the state of the Shadow model, removing all agents and recreating them.
         # Remove existing agents from shadow sites.
         for shadow_site in self.sites.values():
-            for agent in shadow_site.agents:
+            for agent in shadow_site.agents.copy():
                 agent.die()
         # Duplicate each agent from the World model in the Shadow model.
         for pos, site in self.model.sites.items():

@@ -34,7 +34,6 @@ class Feature:
         # Initialize feature identifiers and basic properties.
         self.feature_id = feature_id
         self.current_value_id = 0
-        self.current_value_db_id = 0
         self.model = model
         self.env = env
 
@@ -175,7 +174,7 @@ class Feature:
                 try:
                     del t.payoffs[i_value][value]
                 except KeyError as e:
-                    print(e)
+                    print("KeyError", e, "i:", i_value, "t:", value)
 
         # Remove the trait from payoffs in initiated interactions.
         for i in initiated:
@@ -291,7 +290,9 @@ class Interaction:
         mode = self.model.anchor_bias * anchor  # Mode for the triangular distribution.
         # Determine initiator and target anchors using a triangular distribution.
         i_anchor = round(self.random.triangular(-anchor, anchor, mode), 2)
+        assert i_anchor <= 1.0 and i_anchor >= -1.0
         t_anchor = round(self.random.triangular(-anchor, anchor, mode), 2)
+        assert t_anchor <= 1.0 and t_anchor >= -1.0
         return {"i": i_anchor, "t": t_anchor}
 
     def construct_payoffs(self) -> PayoffDict:
