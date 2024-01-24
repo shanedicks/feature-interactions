@@ -326,6 +326,11 @@ class World(Model):
         f = [f for f in self.feature_interactions.nodes if f.name == name]
         return f[0] if len(f) > 0 else None
 
+    def get_feature_by_id(self, db_id: int):
+        # Find and return a feature by its db_id, returning None if not found.
+        f = [f for f in self.feature_interactions.nodes if f.db_id == db_id]
+        return f[0] if len(f) > 0 else None
+
     def get_or_create_init_features_network(self, num_env: int, num_agent: int) -> None:
         # Initialize or restores the features network for the model.
         self.current_feature_id = 0
@@ -412,7 +417,7 @@ class World(Model):
         interactions = self.db.get_feature_interactions(self, initiator.db_id)
         for i in interactions:
             # Retrieve the target feature for each interaction.
-            target = get_feature_by_id(self, i['target'])
+            target = self.get_feature_by_id(i['target'])
             if target:
                 # Create an Interaction object for each valid interaction.
                 interaction = Interaction(
@@ -480,17 +485,22 @@ class World(Model):
         roles_to_remove = [role for role in self.roles_dict.values() if feature in role.features]
 
         # Update the cached payoffs and roles dictionary.
-        sd = self.sites
+        site_dict = self.sites
         cache = self.cached_payoffs
         for role in roles_to_remove:
             # Clear phenotype cache for each role to be removed.
-            pl = [p for s in sd for p in role.types[s].keys()]
-            for phenotype in pl:
-                keys = [k for k, v in cache.items() if v == phenotype]
+            phenotype_list = [phenotype for site in site_dict for phenotype in role.types[site].keys()]
+            for phenotype in phenotype_list:
+                # Find initiator phenotypes where 'phenotype' is the target phenotype
+                keys = [initiator_phenotype for initiator_phenotype, target_dict in cache.items() if phenotype in target_dict]
                 if phenotype in cache:
                     del cache[phenotype]
-                for k in keys:
-                    del cache[k][phenotype]
+                # Remove target phenotype from each initiator phenotype dictionary where it exists
+                for initiator_phenotype in keys:
+                    del cache[initiator_phenotype][phenotype]
+                    # If the dictionary for this initiator_phenotype is empty after deletion, remove it as well
+                    if not cache[initiator_phenotype]:
+                        del cache[initiator_phenotype]
             del self.roles_dict[role.features]
         # Update affected roles.
         for role in affected_roles:
