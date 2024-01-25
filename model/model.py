@@ -599,7 +599,7 @@ class World(Model):
 
         return db_ids  # Return the dictionary containing database IDs for each table.
 
-    def get_db_rows_dict(self) -> Dict[str, List[Tuple[Any]]]:
+    def get_db_rows_dict(self) -> Dict[str, List]:
         # Create a dictionary to hold lists of database rows for different database tables.
         return {
             'features': [],
