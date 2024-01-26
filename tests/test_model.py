@@ -522,7 +522,6 @@ class TestWorld(unittest.TestCase):
         # Call the method
         result_feature = self.world.restore_feature(feature_dict)
 
-        # Assertions
         mock_feature.assert_called_once_with(feature_id=1, db_id=10, model=self.world, env=False)
         self.assertEqual(self.world.current_feature_db_id, 10)
         self.world.feature_interactions.add_node.assert_called_once_with(restored_feature)
@@ -609,7 +608,6 @@ class TestWorld(unittest.TestCase):
         # Call the method under test
         self.world.restore_interactions(initiator)
 
-        # Assertions
         # Check if the interactions are restored correctly
         self.assertEqual(len(self.world.feature_interactions.edges), 2, "Not all interactions were restored.")
 
@@ -757,7 +755,6 @@ class TestWorld(unittest.TestCase):
         # Call prune_features
         self.world.prune_features()
 
-        # Assertions
         # check_empty and prune_traits should be called for each non-env feature
         for feature in agent_features:
             feature.check_empty.assert_called_once()
@@ -785,7 +782,6 @@ class TestWorld(unittest.TestCase):
         # Call the create_agent method
         agent = self.world.create_agent()
 
-        # Assertions
         # Check that the agent was created with the right traits
         self.mocks['Agent'].assert_called_with(
             unique_id=1,
@@ -833,16 +829,13 @@ class TestWorld(unittest.TestCase):
         }
 
         # Call the method
-        print()
         spacetime_dict = self.world.get_spacetime_dict()
-        print(self.world.db_rows['spacetime'])
 
-        # Assertions
         self.assertEqual(spacetime_dict, expected_spacetime_dict)
 
         for spacetime in self.world.db_rows['spacetime']:
             self.assertIn(spacetime[0], expected_spacetime_dict.values()) # spactime_id in dict
-        
+
         self.assertEqual(len(self.world.db_rows['spacetime']), len(expected_spacetime_dict))
 
     def test_get_db_ids_dict(self):
@@ -862,7 +855,6 @@ class TestWorld(unittest.TestCase):
         # Call the method
         db_ids = self.world.get_db_ids_dict()
 
-        # Assertions
         self.assertEqual(db_ids, expected_db_ids)
 
     @patch('model.model.get_model_vars_row')
@@ -1007,7 +999,6 @@ def test_step(self):
     self.world.step()
 
     self.assertFalse(self.world.running)  # Simulation should stop
-
 
     def tearDown(self):
         patch.stopall()
