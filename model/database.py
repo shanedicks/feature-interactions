@@ -286,14 +286,6 @@ class Manager():
         conn.close()
         return nd
 
-    def get_next_record(self, sql: str, keys: List[str]) -> Union[Dict[str, Any], None]:
-        conn = self.get_connection()
-        record = conn.execute(sql).fetchone()
-        conn.close()
-        if record:
-            record = dict(zip(keys, record))
-        return record
-
     def get_next_feature(
         self,
         world: "World"
@@ -319,12 +311,6 @@ class Manager():
         t_dict = dict(df.iloc[0]) if len(df.index) > 0 else None
         return t_dict
 
-    def get_records(self, sql: str, keys: List[str]) -> List[Dict[str, Any]]:
-        conn = self.get_connection()
-        records = conn.execute(sql).fetchall()
-        conn.close()
-        return [dict(zip(keys, record)) for record in records]
-
     def get_feature_interactions(
             self,
             world: "World",
@@ -333,7 +319,7 @@ class Manager():
         df = world.network_dfs['interactions']
         df = df[df.initiator==feature_id]
         df = df.rename(columns={'interaction_id': 'db_id'})
-        return [dict(row) for i, row in df.iterrows()]
+        return df.to_dict('records')
 
     def get_interaction_payoffs(
         self,
