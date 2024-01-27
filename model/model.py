@@ -497,7 +497,8 @@ class World(Model):
                     del cache[phenotype]
                 # Remove target phenotype from each initiator phenotype dictionary where it exists
                 for initiator_phenotype in keys:
-                    del cache[initiator_phenotype][phenotype]
+                    if initiator_phenotype in cache and phenotype in cache[initiator_phenotype]:
+                        del cache[initiator_phenotype][phenotype]
                     # If the dictionary for this initiator_phenotype is empty after deletion, remove it as well
                     if not cache[initiator_phenotype]:
                         del cache[initiator_phenotype]
