@@ -500,7 +500,7 @@ class World(Model):
                     if initiator_phenotype in cache and phenotype in cache[initiator_phenotype]:
                         del cache[initiator_phenotype][phenotype]
                     # If the dictionary for this initiator_phenotype is empty after deletion, remove it as well
-                    if not cache[initiator_phenotype]:
+                    if initiator_phenotype in cache and not cache[initiator_phenotype]:
                         del cache[initiator_phenotype]
             del self.roles_dict[role.features]
         # Update affected roles.
