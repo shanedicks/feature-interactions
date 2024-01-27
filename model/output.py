@@ -48,22 +48,13 @@ def get_num_roles(world: "World") -> int:
 def get_num_phenotypes(world: "World") -> int:
     return len(occupied_phenotypes_list(world))
 
-def get_total_born(world: "World") -> int:
-    return sum([site.born for site in world.sites.values()])
-
-def get_total_died(world: "World") -> int:
-    return sum([site.died for site in world.sites.values()])
-
-def get_total_moved(world: "World") -> int:
-    return sum([site.moved_in for site in world.sites.values()])
-
 def get_model_vars_row(
         world: "World",
         sd: SpacetimeDict,
         rd: RowDict
     ):
     spacetime_id = sd["world"]
-    utils = np.array([a.utils for a in world.schedule._agents.values()])
+    utils = np.array([a.utils for a in world.schedule.agents])
     row = (
         spacetime_id,
         get_population(world),
@@ -118,41 +109,41 @@ def traits_dist(
         site: Tuple[int, int] = None,
     ) -> Dict["Feature", Dict[str, int]]:
     if site is None:
-        sd = model.sites
-        d = {}
-        for f in model.get_features_list():
-            d[f] = {}
-            for v in f.values:
-                c = sum(
-                    [f.traits_dict[s][v] for s in sd if v in f.traits_dict[s]]
+        site_dict = model.sites
+        return_dict = {}
+        for feature in model.get_features_list():
+            return_dict[feature] = {}
+            for trait in feature.values:
+                count = sum(
+                    [feature.traits_dict[site][trait] for site in site_dict if trait in feature.traits_dict[site]]
                 )
-                if c > 0:
-                    d[f][v] = c
+                if count > 0:
+                    return_dict[feature][trait] = count
     else:
-        d = {}
-        for f in model.get_features_list():
-            d[f] = {v: c for v,c in f.traits_dict[site].items() if c > 0}
-    return d
+        return_dict = {}
+        for feature in model.get_features_list():
+            return_dict[feature] = {trait: count for trait, count in feature.traits_dict[site].items() if count > 0}
+    return return_dict
 
 def role_dist(model: "Model", site: Tuple[int, int] = None) -> Dict['Role', int]:
     d = {}
     if site is None:
-        sd = model.sites
-        for r in model.roles_dict.values():
+        site_dict = model.sites
+        for role in model.roles_dict.values():
             type_dist = {}
-            for s in sd:
-                for k, v in r.types[s].items():
-                    if v > 0:
-                        type_dist[k] = type_dist.get(k, 0) + v
+            for site in site_dict:
+                for phenotype, count in role.types[site].items():
+                    if count > 0:
+                        type_dist[phenotype] = type_dist.get(phenotype, 0) + count
             total = sum(type_dist.values())
-            shannon = round(-sum([(v/total)*log2(v/total) for v in type_dist.values()]), 2)
-            d[r] = (shannon, len(type_dist.keys()), total)
+            shannon = round(-sum([(count/total)*log2(count/total) for count in type_dist.values()]), 2)
+            d[role] = (shannon, len(type_dist.keys()), total)
     else:
-        for r in model.roles_dict.values():
-            type_dist = [v for v in r.types[site].values() if v > 0]
+        for role in model.roles_dict.values():
+            type_dist = [count for count in role.types[site].values() if count > 0]
             total = sum(type_dist)
-            shannon = round(sum([(v/total)*log2(v/total) for v in type_dist]),2)
-            d[r] = (shannon, len(type_dist), total)
+            shannon = round(sum([(count/total)*log2(count/total) for count in type_dist]),2)
+            d[role] = (shannon, len(type_dist), total)
     return sorted(
             [[role, desc] for role, desc in d.items() if desc[2] > 0], 
             key=lambda x: x[1][2],
@@ -160,41 +151,26 @@ def role_dist(model: "Model", site: Tuple[int, int] = None) -> Dict['Role', int]
         )
 
 def phenotype_dist(model: "Model", site: Tuple[int, int] = None) -> Dict[str, int]:
-    rd = model.roles_dict.values()
-    d = {}
+    roles_dict = model.roles_dict.values()
+    phenotype_dict = {}
     if site is None:
-        sd = model.sites
-        l = {(p,r) for r in rd for s in sd for p,n in r.types[s].items() if n > 0}
-        for p,r in l:
-            d[p] = sum([r.types[s][p] for s in sd if p in r.types[s]])
+        site_dict = model.sites
+        phenotype_set = {(phenotype, role) for role in roles_dict for site in site_dict for phenotype, count in role.types[site].items() if count > 0}
+        for phenotype, role in phenotype_set:
+            phenotype_dict[phenotype] = sum([role.types[site][phenotype] for site in site_dict if phenotype in role.types[site]])
     else:
-        l = {(p,r) for r in rd for p,n in r.types[site].items() if n > 0}
-        for p,r in l:
-            d[p] = r.types[site][p]
-    return {k:v for k,v in d.items() if v > 0}
+        phenotype_set = {(phenotype, role) for role in roles_dict for phenotype, count in role.types[site].items() if count > 0}
+        for phenotype, role in phenotype_set:
+            phenotype_dict[phenotype] = role.types[site][phenotype]
+    return {phenotype: count for phenotype, count in phenotype_dict.items() if count > 0}
 
 def env_report(world: "World"):
     print("Pos, Pop, Pop change, Cost, Utils")
     for s in world.sites.values():
-        pop = len(world.grid.get_cell_list_contents(s.pos))
-        utils = {k: round(v, 2) for k, v in s.utils.items()}
-        print(s.pos, pop, s.born - s.died, round(s.pop_cost,2), utils)
+        utils = {feature: round(utils, 2) for feature, utils in s.utils.items()}
+        print(s.pos, s.get_pop(), s.born - s.died, round(s.pop_cost, 2), utils)
 
 # Utilities
-def get_feature_by_name(world: "World", name: str):
-    f = [f for f in world.feature_interactions.nodes if f.name == name]
-    f = f[0] if len(f) > 0 else None
-    return f
-
-def get_feature_by_id(world: "World", db_id: int):
-    f = [f for f in world.feature_interactions.nodes if f.db_id == db_id]
-    f = f[0] if len(f) > 0 else None
-    return f
-
-def get_role_by_name(world: "World", name: str):
-    f = [f for f in world.feature_interactions.nodes if f.name in name.split(":")]
-    return world.roles_dict.get(frozenset(f), None)
-
 def payoff_quantiles(interaction: "Interaction"):
     payoffs = [p for item in interaction.payoffs.values() for p in item.values()]
     count = len(payoffs)
