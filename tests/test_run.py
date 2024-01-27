@@ -363,7 +363,6 @@ class TestController(unittest.TestCase):
             experiment_name="test_experiment",
             path_to_db="/path/to/db"
         )
-        controller.features_network = None  # features_network is usually None
 
         # Call run method with provided network_params and world_params
         controller.run(self.num_networks, self.num_iterations, self.max_steps, self.network_params, self.world_params)
@@ -384,7 +383,6 @@ class TestController(unittest.TestCase):
             experiment_name="test_experiment",
             path_to_db="/path/to/db"
         )
-        controller.features_network = None  # features_network is usually None
 
         # Call run method without network_params and world_params (use defaults)
         controller.run(self.num_networks, self.num_iterations, self.max_steps)
@@ -413,7 +411,6 @@ class TestController(unittest.TestCase):
             path_to_db="/path/to/db"
         )
         controller.max_steps = self.max_steps
-        controller.features_network = None  # features_network is usually None
 
         # Call run_network method
         controller.run_network(network, num_iterations, world_params_dict)
