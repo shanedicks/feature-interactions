@@ -361,6 +361,11 @@ def get_df(db_path: str, sql: str, dtype: Optional[Dict[str, str]] = None) -> pd
     conn.close()
     return df
 
+def get_steps_list(db_path: str) -> List[int]:
+    sql = "SELECT DISTINCT step_num FROM spacetime ORDER BY step_num ASC;"
+    df = get_df(db_path, sql)
+    return df['step_num'].tolist()
+
 def get_world_dict(db_path) -> Dict[int, int]:
     return dict(get_params_df(db_path)[['world_id', 'network_id']].itertuples(index=False))
 

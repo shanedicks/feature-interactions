@@ -8,7 +8,7 @@ import matplotlib.patches as mpatches
 import matplotlib.colors as mcolors
 import networkx as nx
 import pandas as pd
-import database as db
+import model.database as db
 import model.output as out
 from datetime import datetime
 from multiprocessing import Pool
@@ -38,16 +38,16 @@ class BasePlot:
 
 class PopulationPlot(BasePlot):
 
-    def plot(self):
+    def plot(self, plot_type = 'area', num_types = 1000):
         for shadow in [False, True]:
             s = ["", "s_"][shadow]
             for w, n in self.world_dict.items():
                 logging.info(f"Trying world {w}")
                 ph_df = db.get_phenotypes_df(self.db_path, shadow, worlds=w)
                 if not ph_df.empty:
-                    self.save_pivot_fig(ph_df, self.role_pivot, shadow, w, n)
+                    self.save_pivot_fig(ph_df, self.role_pivot, plot_type, shadow, w, n)
                     m = ph_df.groupby('phenotype')['pop'].sum()
-                    phenotypes = tuple(m.nlargest(1000).index)
+                    phenotypes = tuple(m.nlargest(num_types).index)
                     if len(phenotypes) == 1:
                         phenotypes = phenotypes[0]
                     ph_df = db.get_phenotypes_df(
@@ -55,12 +55,13 @@ class PopulationPlot(BasePlot):
                         worlds=w,
                         phenotypes=phenotypes
                     )
-                    self.save_pivot_fig(ph_df, self.phenotype_pivot, shadow, w, n)
+                    self.save_pivot_fig(ph_df, self.phenotype_pivot, plot_type, shadow, w, n)
 
     def save_pivot_fig(
         self,
         df: pd.DataFrame,
         pivot: Callable,
+        plot_type: str,
         shadow: bool,
         w: int,
         n: int
@@ -69,7 +70,10 @@ class PopulationPlot(BasePlot):
             s = ["", "s_"][shadow]
             prefix = f"{s}{pop_type[0].lower()}"
             title = f"{pop_type} Distribution Over Time\n Network:{n} | World: {w}"
-            df.pipe(pivot).pipe(self.pop_plot, title=title)
+            if plot_type == 'line':
+                df.pipe(pivot).pipe(self.pop_plot, title=title)
+            else:
+                df.pipe(pivot).pipe(self.area_pop_plot, title=title)
             plt.tight_layout()
             plt.savefig(f"{self.plot_dir}/{prefix}_n{n}w{w}.png")
             plt.close()
@@ -92,8 +96,17 @@ class PopulationPlot(BasePlot):
             aggfunc='sum'
         )
 
-    def pop_plot(self, df: pd.DataFrame, title: str, legend = False) -> None:
+    def area_pop_plot(self, df: pd.DataFrame, title: str, legend = False) -> None:
         df.ewm(span=20).mean().plot.area(
+            legend=legend,
+            title=title,
+            xlabel="Step",
+            ylabel="Population",
+            figsize=(19.2, 9.66)
+        )
+
+    def pop_plot(self, df: pd.DataFrame, title: str, legend = False) -> None:
+        df.ewm(span=20).mean().plot(
             legend=legend,
             title=title,
             xlabel="Step",
@@ -155,6 +168,15 @@ class NetworkPlot(BasePlot):
         self.interactions_df = db.get_interactions_df(self.db_path)
         self.feature_changes_df = db.get_feature_changes_df(self.db_path)
         self.sites_dict = db.get_sites_dict(self.db_path)
+
+    def get_evenly_spaced_steps(self, num_plots: int) -> List[int]:
+        all_steps = db.get_steps_list(self.db_path)
+        if num_plots >= len(all_steps):
+            return all_steps
+        interval = max(len(all_steps) // num_plots, 1)
+        selected_steps = all_steps[::interval]
+        selected_steps.append(all_steps[-1])
+        return selected_steps
 
     def set_node_postions(
         self,
@@ -293,7 +315,8 @@ class NetworkPlot(BasePlot):
         self,
         network_ids: Optional[List[int]] = None,
         world_ids: Optional[List[int]] = None,
-        steps: Optional[List[int]] = None
+        steps: Optional[List[int]] = None,
+        num_plots: Optional[int] = None
         ) -> None:
         
         json_file_path = os.path.join(self.db_loc, "features_networks_data.json")
@@ -314,7 +337,12 @@ class NetworkPlot(BasePlot):
                     continue
                 logging.info(f"Generating plots for world {wid}")
                 G = nx.node_link_graph(world_data)
-                plot_steps = steps if steps else G.graph.get('change_steps', [])
+                if steps:
+                    plot_steps = steps
+                elif num_plots:
+                    plot_steps = self.get_evenly_spaced_steps(num_plots)
+                else:
+                    plot_steps = G.graph.get('change_steps', [])
                 for step in plot_steps:
                     logging.info(f"Plotting world {wid} step {step}")
                     nodes_to_include = [
@@ -479,7 +507,8 @@ class NetworkPlot(BasePlot):
         self,
         network_ids: Optional[List[int]] = None,
         world_ids: Optional[List[int]] = None,
-        steps: Optional[List[int]] = None
+        steps: Optional[List[int]] = None,
+        num_plots: Optional[int] = None
         ) -> None:        
         json_file_path = os.path.join(self.db_loc, "role_networks_data.json")
         if not os.path.isfile(json_file_path):
@@ -501,7 +530,12 @@ class NetworkPlot(BasePlot):
                 for site_id, site_data in sites.items():
                     logging.info(f"Beginning site {site_id}")
                     G = nx.node_link_graph(site_data)
-                    plot_steps = steps if steps else G.graph.get('change_steps', []) 
+                    if steps:
+                        plot_steps = steps
+                    elif num_plots:
+                        plot_steps = self.get_evenly_spaced_steps(num_plots)
+                    else:
+                        plot_steps = G.graph.get('change_steps', []) 
                     for step in plot_steps:
                         logging.info(f"Updating role network for world {wid}{site_id} at step {step}")
                         ph_df = db.get_phenotypes_df(
@@ -511,6 +545,8 @@ class NetworkPlot(BasePlot):
                             sites=site_id,
                             steps=step
                         )
+                        if ph_df.empty:
+                            break
                         updated_G = self.update_role_network(G, ph_df)
                         logging.info(f"Plotting world {wid}{site_id} step {step}")
                         site_id_formatted = site_id.replace(", ", "_").replace("(", "").replace(")", "")
