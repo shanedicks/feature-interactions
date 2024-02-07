@@ -362,7 +362,12 @@ def get_df(db_path: str, sql: str, dtype: Optional[Dict[str, str]] = None) -> pd
     return df
 
 def get_steps_list(db_path: str) -> List[int]:
-    sql = "SELECT DISTINCT step_num FROM spacetime ORDER BY step_num ASC;"
+    sql = """
+        SELECT DISTINCT spacetime.step_num
+        FROM spacetime
+        JOIN phenotypes ON spacetime.spacetime_id = phenotypes.spacetime_id
+        ORDER BY spacetime.step_num ASC;
+    """
     df = get_df(db_path, sql)
     return df['step_num'].tolist()
 
@@ -371,38 +376,25 @@ def get_world_dict(db_path) -> Dict[int, int]:
 
 def get_sites_dict(db_path) -> Dict[int, Dict[Tuple[int, int], List[str]]]:
     sql = """
-        SELECT 
-            spacetime.site_pos,
-            spacetime.world_id,
-            traits.name AS trait_name,
-            features.name AS feature_name
-        FROM 
-            environment
-        JOIN 
-            spacetime ON environment.spacetime_id = spacetime.spacetime_id
-        JOIN 
-            traits ON environment.trait_id = traits.trait_id
-        JOIN 
-            features ON traits.feature_id = features.feature_id
-        GROUP BY
-            spacetime.site_pos, spacetime.world_id, traits.name, features.name;
+        SELECT spacetime.site_pos,
+               spacetime.world_id,
+               traits.name AS trait_name,
+               features.name AS feature_name
+        FROM environment
+        JOIN spacetime ON environment.spacetime_id = spacetime.spacetime_id
+        JOIN traits ON environment.trait_id = traits.trait_id
+        JOIN features ON traits.feature_id = features.feature_id
+        GROUP BY spacetime.site_pos, spacetime.world_id, traits.name, features.name;
     """
-
     df = get_df(db_path, sql)
+    df['feature_trait'] = df['feature_name'] + '.' + df['trait_name']
     sites_dict = {}
+    grouped = df.groupby(['world_id', 'site_pos'])
+    for (world_id, site_pos), group in grouped:
+        if world_id not in sites_dict:
+            sites_dict[world_id] = {}
+        sites_dict[world_id][site_pos] = group['feature_trait'].tolist()
 
-    for index, row in df.iterrows():
-        world = row['world_id']
-        site = row['site_pos']
-        feature_trait = f"{row['feature_name']}.{row['trait_name']}"
-
-        if world not in sites_dict:
-            sites_dict[world] = {}
-
-        if site not in sites_dict[world]:
-            sites_dict[world][site] = []
-
-        sites_dict[world][site].append(feature_trait)
     return sites_dict
 
 def get_params_df(db_path: str) -> pd.DataFrame:

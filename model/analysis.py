@@ -546,6 +546,7 @@ class NetworkPlot(BasePlot):
                             steps=step
                         )
                         if ph_df.empty:
+                            logging.info(f"Empty Phenotypes Dataframe, continuing to next site")
                             break
                         updated_G = self.update_role_network(G, ph_df)
                         logging.info(f"Plotting world {wid}{site_id} step {step}")
