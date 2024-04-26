@@ -6,6 +6,7 @@ import sys
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 import matplotlib.colors as mcolors
+import numpy as np
 import networkx as nx
 import pandas as pd
 import model.database as db
@@ -38,10 +39,11 @@ class BasePlot:
 
 class PopulationPlot(BasePlot):
 
-    def plot(self, plot_type = 'area', num_types = 1000):
+    def plot(self, plot_type = 'area', num_types = 1000, world=None):
+        worlds_to_plot = [(world, self.world_dict[world])] if world is not None else self.world_dict.items()
         for shadow in [False, True]:
             s = ["", "s_"][shadow]
-            for w, n in self.world_dict.items():
+            for w, n in worlds_to_plot:
                 logging.info(f"Trying world {w}")
                 ph_df = db.get_phenotypes_df(self.db_path, shadow, worlds=w)
                 if not ph_df.empty:
@@ -75,7 +77,7 @@ class PopulationPlot(BasePlot):
             else:
                 df.pipe(pivot).pipe(self.area_pop_plot, title=title)
             plt.tight_layout()
-            plt.savefig(f"{self.plot_dir}/{prefix}_n{n}w{w}.png")
+            plt.savefig(f"{self.plot_dir}/{prefix}_n{n}w{w}.png", dpi=300)
             plt.close()
 
     def phenotype_pivot(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -97,22 +99,21 @@ class PopulationPlot(BasePlot):
         )
 
     def area_pop_plot(self, df: pd.DataFrame, title: str, legend = False) -> None:
-        df.ewm(span=20).mean().plot.area(
-            legend=legend,
-            title=title,
-            xlabel="Step",
-            ylabel="Population",
-            figsize=(19.2, 9.66)
-        )
+        plt.figure(figsize=(6.5, 4.875))
+        ax = df.ewm(span=20).mean().plot.area(legend=legend)
+        ax.set_title(title, fontsize=12)
+        ax.set_xlabel("Step", fontsize=10)
+        ax.set_ylabel("Population", fontsize=10)
+        ax.tick_params(axis='both', labelsize=10)
+        plt.tight_layout()
 
     def pop_plot(self, df: pd.DataFrame, title: str, legend = False) -> None:
-        df.ewm(span=20).mean().plot(
-            legend=legend,
-            title=title,
-            xlabel="Step",
-            ylabel="Population",
-            figsize=(19.2, 9.66)
-        )
+        plt.figure(figsize=(6.5, 4.875))
+        ax = df.ewm(span=20).mean().plot(legend=legend)
+        ax.set_title(title, fontsize=12)
+        ax.set_xlabel("Step", fontsize=10)
+        ax.set_ylabel("Population", fontsize=10)
+        ax.tick_params(axis='both', labelsize=10)
 
 class ModelVarsPlot(BasePlot):
 
@@ -132,7 +133,7 @@ class ModelVarsPlot(BasePlot):
             ("Number of Features", "num_features"),
             ("Agent/Agent Interactions", "agent_int"),
             ("Agent/Environment Interactions", "env_int"),
-    ]
+        ]
         for name, column in plot_columns:
             try:
                 df = mv_df.pivot(index='step_num', columns='world_id', values=column).fillna(0)
@@ -142,19 +143,101 @@ class ModelVarsPlot(BasePlot):
             for n in nd:
                 title = f"{name} Over Time\n Network {n}"
                 try:
-                    df[nd[n]].ewm(span=100).mean().plot(
-                        title=title,
-                        xlabel="Step",
-                        ylabel=name,
-                        figsize=(19.2, 9.66),
-                    )
+                    title = f"{name} Over Time\n Network {n}"
+                    fig, ax = plt.subplots(figsize=(6.5, 3.656))  # Creates both figure and axes with the specified size
+                    df[nd[n]].ewm(span=100).mean().plot(ax=ax)  # Use the created axes for plotting
+
+                    ax.set_title(title, fontsize=12)
+                    ax.set_xlabel("Step", fontsize=10)
+                    ax.set_ylabel(name, fontsize=10)
+                    ax.tick_params(axis='both', which='major', labelsize=10)
+
                     plt.tight_layout()
-                    plt.savefig(f"{self.plot_dir}/{column}_{n}.png")
-                    plt.close()
+                    plt.savefig(f"{self.plot_dir}/{column}_{n}.png", dpi=300)
+                    plt.close(fig)
                 except KeyError as e:
                     logging.error(e)
                     continue
 
+
+class PayoffPlot(BasePlot):
+
+    def __init__(
+        self,
+        db_loc: str,
+        db_name: str,
+        output_directory: str,
+    ) -> None:
+        super().__init__(db_loc, db_name, output_directory)
+        self.interactions_df = db.get_interactions_df(self.db_path)
+
+    def plot(self, plot_type, network_ids=None):
+        # If network_ids is not provided, plot for all unique network IDs
+        if network_ids is None:
+            network_ids = self.interactions_df['network_id'].unique()
+        # If a single network_id is provided, wrap it in a list
+        elif isinstance(network_ids, int):
+            network_ids = [network_ids]
+
+        # Loop through the provided network IDs
+        for network_id in network_ids:
+            payoffs_df = db.get_payoffs_df(self.db_path, network_id)
+            # Call the plotting function based on plot_type
+            if plot_type == 'scatter':
+                self.scatter(payoffs_df, self.interactions_df)
+            elif plot_type == 'box_and_whisker':
+                self.box_and_whisker(payoffs_df, self.interactions_df)
+            else:
+                raise ValueError(f"Plot type '{plot_type}' is not recognized. Use 'scatter' or 'box_and_whisker'.")
+
+
+    def scatter(self, payoffs_df, interactions_df):
+        fig, ax = plt.subplots(figsize=(6, 4.875))
+        for interaction_id in payoffs_df['interaction_id'].unique():
+            subset = payoffs_df[payoffs_df['interaction_id'] == interaction_id]
+            anchor_row = interactions_df[interactions_df['interaction_id'] == interaction_id].iloc[0]
+            initiator, target = anchor_row['initiator'], anchor_row['target']
+            label = f"{initiator} -> {target}"
+
+            ax.scatter(subset['initiator_payoff'], subset['target_payoff'], label=label, s=2)
+
+        ax.axhline(0, color='grey', linestyle='--')
+        ax.axvline(0, color='grey', linestyle='--')
+        ax.set_title('Initiator vs. Target Payoffs by Interaction')
+        ax.set_xlabel('Initiator Payoff')
+        ax.set_ylabel('Target Payoff')
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(-1, 1)
+        ax.grid(True)
+        plt.tight_layout()
+        plt.show()
+
+    def box_and_whisker(self, payoffs_df, interactions_df):
+        fig, ax = plt.subplots(figsize=(6, 4.5))
+        for interaction_id in payoffs_df['interaction_id'].unique():
+            payoff_subset = payoffs_df[payoffs_df['interaction_id'] == interaction_id]
+
+            median_initiator = np.median(payoff_subset['initiator_payoff'])
+            median_target = np.median(payoff_subset['target_payoff'])
+
+            ax.boxplot(payoff_subset['initiator_payoff'], vert=False, positions=[median_target], widths=0.03, patch_artist=True, boxprops=dict(facecolor='skyblue', alpha=0.5),  showfliers=False)
+            ax.boxplot(payoff_subset['target_payoff'], vert=True, positions=[median_initiator], widths=0.02, patch_artist=True, boxprops=dict(facecolor='lightgreen', alpha=0.5), showfliers=False)
+
+        ax.axhline(0, color='grey', linestyle='--')
+        ax.axvline(0, color='grey', linestyle='--')
+        ticks = np.linspace(-1, 1, 21)
+        tick_labels = ['{:.1f}'.format(tick) for tick in ticks]
+        ax.set_title('Initiator vs. Target Payoffs by Interaction')
+        ax.set_xticks(ticks)
+        ax.set_yticks(ticks)
+        ax.set_xticklabels(tick_labels)
+        ax.set_yticklabels(tick_labels)
+        ax.set_xlim(-1, 1)
+        ax.set_ylim(-1, 1)
+        ax.set_xlabel('Initiator Payoffs')
+        ax.set_ylabel('Target Payoffs')
+        plt.tight_layout()
+        plt.show()
 
 class NetworkPlot(BasePlot):
 
@@ -294,7 +377,7 @@ class NetworkPlot(BasePlot):
         ) -> None:
         pos = {node: data['pos'] for node, data in G.nodes(data=True)}
         labels = {n: n for n in pos.keys()}
-        plt.figure(figsize=(10, 8)) 
+        plt.figure(figsize=(6.5, 4.875)) 
         for node, data in G.nodes(data=True):
             nx.draw_networkx_nodes(
                 G,pos,nodelist=[node],
@@ -308,7 +391,7 @@ class NetworkPlot(BasePlot):
         agent_patch = mpatches.Patch(color='skyblue', label='Agent Features')
         env_patch = mpatches.Patch(color='lightgreen', label='Environment Features')
         plt.legend(handles=[agent_patch, env_patch])
-        plt.savefig(file_path)
+        plt.savefig(file_path, dpi=300)
         plt.close()
 
     def plot_features_networks(
@@ -402,21 +485,15 @@ class NetworkPlot(BasePlot):
         return G
 
     def export_role_networks_to_json(self) -> None:
-        networks_data = {}
         i_df = self.interactions_df
-        fc_df = self.feature_changes_df
         all_sites = set(site for world_sites in self.sites_dict.values() for site in world_sites)
 
-        for wid, nid in self.world_dict.items():
-            if nid not in networks_data:
-                networks_data[nid] = {}
-            networks_data[nid][wid] = {site: {} for site in all_sites}
-
-        for nid, worlds in networks_data.items():
+        for nid in set(self.world_dict.values()):
             logging.info(f"Beginning network {nid}")
-            for wid, sites in worlds.items():
+            for wid in [w for w, n in self.world_dict.items() if n == nid]:
                 logging.info(f"Beginning world {wid}")
-                for site in sites:
+                networks_data[wid] = {site: {} for site in all_sites}
+                for site in all_sites:
                     logging.info(f"Constructing role network for world {wid} {site}")
                     env_nodes = []
                     if site in self.sites_dict.get(wid, {}):
@@ -438,11 +515,12 @@ class NetworkPlot(BasePlot):
                     logging.info("Preparing json data")
                     validate_and_convert_floats(role_network)
                     network_json = nx.node_link_data(role_network)
-                    networks_data[nid][wid][site] = network_json
-        logging.info("Preparing to write json file")
-        output_file_path = os.path.join(self.db_loc, "role_networks_data.json")
-        with open(output_file_path, 'w') as json_file:
-            json.dump(networks_data, json_file, indent=4)
+                    networks_data[wid][site] = network_json
+            logging.info("Preparing to write json file")
+            output_file_path = os.path.join(self.db_loc, f"role_networks_data_nid_{nid}.json")
+            with open(output_file_path, 'w') as json_file:
+                json.dump(networks_data, json_file, indent=4)
+            logging.info(f"Networks JSON for nid {nid} written to {output_file_path}")
 
     def update_role_network(
         self,
@@ -500,7 +578,7 @@ class NetworkPlot(BasePlot):
         plt.title(title)
         plt.tight_layout()
         plt.colorbar(sm_pop, label='Population')
-        plt.savefig(file_path)
+        plt.savefig(file_path, dpi=300)
         plt.close()
 
     def plot_role_networks(
@@ -510,23 +588,24 @@ class NetworkPlot(BasePlot):
         steps: Optional[List[int]] = None,
         num_plots: Optional[int] = None
         ) -> None:        
-        json_file_path = os.path.join(self.db_loc, "role_networks_data.json")
-        if not os.path.isfile(json_file_path):
-            raise FileNotFoundError(f"File not found at {json_file_path}")
-
         role_networks_dir = os.path.join(self.plot_dir, 'role_networks')
         os.makedirs(role_networks_dir, exist_ok=True)
 
-        with open(json_file_path, 'r') as file:
-            networks_data = json.load(file)
-        for nid, worlds in networks_data.items():
-            if network_ids is not None and nid not in map(str, network_ids):
+        if network_ids is None:
+            network_ids = set(self.world_dict.values())
+
+        for nid in network_ids:
+            json_file_path = os.path.join(self.db_loc, f"role_networks_data_nid_{nid}.json")
+            if not os.path.isfile(json_file_path):
+                logging.warning(f"File not found for network ID {nid} at {json_file_path}")
                 continue
-            logging.info(f"Beginning network {nid}")
-            for wid, sites in worlds.items():
-                if world_ids is not None and wid not in map(str, world_ids):
+
+            with open(json_file_path, 'r') as file:
+                networks_data = json.load(file)
+            for wid, sites in networks_data.items():
+                if world_ids is not None and int(wid) not in world_ids:
                     continue
-                logging.info(f"Beginning world {wid}")
+                logging.info(f"Beginning network {nid}, world {wid}")
                 for site_id, site_data in sites.items():
                     logging.info(f"Beginning site {site_id}")
                     G = nx.node_link_graph(site_data)
@@ -565,6 +644,103 @@ def is_light_color(color):
     luminance = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
     return luminance > 0.5
 
+def shannon_entropy(proportions: List[float]):
+    proportions = np.array(proportions)
+    nonzero_proportions = proportions[proportions != 0]
+    if len(nonzero_proportions) == 0:
+        return 0.0
+    entropy = -np.sum(nonzero_proportions * np.log2(nonzero_proportions))
+    return entropy
+
+def add_evolutionary_activity_columns(df):
+
+    df['phenotype_activity'] = df.groupby(['world_id', 'phenotype']).cumcount() + 1
+    df['phenotype_cum_pop'] = df.groupby(['world_id', 'phenotype'])['pop'].cumsum()
+
+    df['role_step'] = df.groupby(['world_id', 'role', 'step_num']).ngroup()
+    df['role_activity'] = df.groupby(['world_id', 'role'])['role_step'].transform(lambda x: pd.factorize(x)[0] + 1)
+    df = df.drop('role_step', axis=1)
+
+    df['role_pop'] = df.groupby(['world_id', 'step_num', 'role'])['pop'].transform('sum')
+    df['role_cum_pop'] = df.groupby(['world_id', 'role'])['role_pop'].cumsum()
+    df = df.drop('role_pop', axis=1)
+
+    return df
+
+def calculate_evolutionary_activity_stats(df):
+    grouped = df.groupby(['world_id', 'step_num'])
+
+    phenotype_acum = grouped['phenotype_activity'].sum()
+    phenotype_nunique = grouped['phenotype'].nunique()
+    role_acum = grouped['role_activity'].sum()
+    role_nunique = grouped['role'].nunique()
+
+    phenotype_entropy = []
+    role_entropy = []
+
+    for _, group in grouped:
+        pop_sum = group['pop'].sum()
+        proportions = group['pop'] / pop_sum
+        phenotype_entropy.append(shannon_entropy(proportions))
+        role_pop = group.groupby('role')['pop'].sum()
+        role_proportions = role_pop / pop_sum
+        role_entropy.append(shannon_entropy(role_proportions))
+
+    stats_df = pd.DataFrame({
+        'world_id': phenotype_acum.index.get_level_values('world_id'),
+        'step_num': phenotype_acum.index.get_level_values('step_num'),
+        'phenotype_acum': phenotype_acum,
+        'phenotype_acum_mean': phenotype_acum / phenotype_nunique,
+        'role_acum': role_acum,
+        'role_acum_mean': role_acum / role_nunique,
+        'phenotype_diversity': phenotype_nunique,
+        'role_diversity': role_nunique,
+        'phenotype_entropy': phenotype_entropy,
+        'role_entropy': role_entropy
+    })
+
+    return stats_df
+
+def plot_world_data(df1, df2, world_ids, target_column):
+    for world_id in world_ids:
+        filtered_df1 = df1[df1['world_id'] == world_id]
+        filtered_df2 = df2[df2['world_id'] == world_id]
+
+        plt.figure(figsize=(10, 6))
+
+        plt.plot(filtered_df1['step_num'], filtered_df1[target_column], label='DataFrame 1', color='blue')
+
+        plt.plot(filtered_df2['step_num'], filtered_df2[target_column], label='DataFrame 2', color='gray')
+
+        plt.title(f'World {world_id}: {target_column} over Steps')
+        plt.xlabel('Step Number')
+        plt.ylabel(target_column)
+        plt.legend()
+        plt.show()
+
+class EvolutionaryActivityStatistics:
+    def __init__(self, dataframe):
+        self.df = dataframe
+
+    def calculate_diversity(self, by='role'):
+        diversity_df = self.df.groupby(['site_pos', 'step_num'])[by].nunique().reset_index(name='diversity')
+        return diversity_df
+
+    def calculate_total_cumulative_activity(self):
+        total_activity = self.df.groupby(['site_pos', 'step_num'])['pop'].sum().reset_index(name='total_activity')
+        return total_activity
+
+    def calculate_mean_cumulative_activity(self):
+        total_activity_df = self.calculate_total_cumulative_activity()
+        diversity_df = self.calculate_diversity()
+        merged_df = pd.merge(total_activity_df, diversity_df, on=['site_pos', 'step_num'])
+        merged_df['mean_activity'] = merged_df['total_activity'] / merged_df['diversity']
+        return merged_df[['step_num', 'site_pos', 'mean_activity']]
+
+    def calculate_new_evolutionary_activity(self):
+        pass
+
+
 def activity(df: pd.DataFrame, pivot: Callable) -> pd.DataFrame:
     return df.pipe(pivot).notna().cumsum()
 
@@ -573,6 +749,12 @@ def pop_activity(df: pd.DataFrame, pivot: Callable) -> pd.DataFrame:
 
 def diversity(df: pd.DataFrame, pivot: Callable) -> pd.DataFrame:
     return df.pipe(activity, pivot=pivot).apply(lambda x: x > 0).sum(axis = 1)
+
+def phenotype_pivot(df: pd.DataFrame) -> pd.DataFrame:
+    return pd.pivot_table(df, index='step_num', columns="phenotype", values="pop", aggfunc='sum')
+
+def role_pivot(df: pd.DataFrame) -> pd.DataFrame:
+    return pd.pivot_table(df, index='step_num', columns="role", values="pop", aggfunc='sum')
 
 def gen_activity_plots(
     df: pd.DataFrame,
@@ -591,52 +773,43 @@ def gen_activity_plots(
         title = f"Network: {n_id} | World: {i}"
         activity(df=df, pivot=pivot).plot(legend=False, title=title, xlabel="Step", ylabel="Activity")
         if save:
-            plt.savefig(f"{dest}activity_n{n_id}w{i}{suffix}.png")
+            plt.savefig(f"{dest}activity_n{n_id}w{i}{suffix}.png", dpi=300)
             plt.close()
         else:
             plt.show()
 
-def get_CAD(
-    df: pd.DataFrame,
-    activity: Callable,
-    pivot: Callable,
-    ) -> pd.DataFrame:
-    return df.pipe(activity, pivot=pivot).apply(pd.Series.value_counts, axis = 1)
+def get_CAD(df: pd.DataFrame, activity_col: str) -> pd.DataFrame:
+    cad_df = df.groupby(['step_num', activity_col]).size().unstack(fill_value=0)
+    return cad_df
 
 def CAD_plot(
     df: pd.DataFrame,
     s_df: pd.DataFrame,
-    activity: Callable,
-    pivot: Callable,
+    activity_col: str,
     title: str,
-    ) -> None:
-    total = pivot(df).shape[1] + pivot(s_df).shape[1]
-    CAD = get_CAD(df=df, activity=activity, pivot=pivot).sum().div(total).plot(loglog=True, title=title)
-    sCAD = get_CAD(df=s_df, activity=activity, pivot=pivot).sum().div(total).plot(loglog=True, title=title)
+) -> None:
+    CAD = get_CAD(df, activity_col).sum()
+    sCAD = get_CAD(s_df, activity_col).sum()
 
-def gen_CAD_plots(
-    db_loc: str,
-    db_name: str,
-    resolution: Optional[int] = None,
-    ) -> None:
-    if id_list is None:
-        id_list = [i for i in df['world_id'].unique()]
-    pop_type = pivot.__name__.split('_')[0].title()
-    for i in id_list:
-        n_id = wd[i]
-        title = f"Network: {n_id} | World: {i}"
-        CAD_plot(
-            df=df.loc[df["world_id"]==i],
-            s_df=s_df.loc[s_df["world_id"]==i],
-            activity=activity,
-            pivot=pivot,
-            title=title
-        )
-        if save:
-            plt.savefig(f"{dest}/CAD_n{n_id}w{i}{suffix}.png")
-            plt.close()
-        else:
-            plt.show()
+    total = CAD.sum() + sCAD.sum()
+
+    CAD = CAD / total
+    sCAD = sCAD / total
+
+    CAD.plot(loglog=True, title=title)
+    sCAD.plot(loglog=True, title=title)
+
+
+def create_indexes(db_loc, db_name):
+    db_path = os.path.join(db_loc, db_name)
+    db.create_indexes(db_path)
+
+def drop_phenotype_phenotype_index(db_loc, db_name):
+    conn = db.get_connection()
+    cursor = conn.cursor
+    cursor.execute("DROP INDEX IF EXISTS idx_phenotypes_phenotype")
+    conn.commit()
+    conn.close()
 
 def validate_and_convert_floats(G):
     for _, node_data in G.nodes(data=True):

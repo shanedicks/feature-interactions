@@ -361,6 +361,23 @@ def get_df(db_path: str, sql: str, dtype: Optional[Dict[str, str]] = None) -> pd
     conn.close()
     return df
 
+def create_indexes(db_path: str) -> None:
+    index_queries = [
+        "CREATE INDEX IF NOT EXISTS idx_phenotypes_spacetime_id ON phenotypes(spacetime_id);",
+        "CREATE INDEX IF NOT EXISTS idx_spacetimes_site_pos ON spacetime(site_pos);",
+        "CREATE INDEX IF NOT EXISTS idx_spacetimes_step_num ON spacetime(step_num);",
+        "CREATE INDEX IF NOT EXISTS idx_spacetimes_world_id ON spacetime(world_id);"
+    ]
+
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+
+    for query in index_queries:
+        cursor.execute(query)
+
+    conn.commit()
+    conn.close()
+
 def get_steps_list(db_path: str) -> List[int]:
     sql = """
         SELECT DISTINCT spacetime.step_num
@@ -506,24 +523,62 @@ def get_phenotypes_df(
 def get_feature_changes_df(
         db_path: str,
     ) -> pd.DataFrame:
-    sql = """SELECT world_id, step_num, FC.feature_id, name, env, change
-             FROM feature_changes AS FC
-             JOIN features AS F ON F.feature_id = FC.feature_id
-             JOIN spacetime AS S ON S.spacetime_id = FC.spacetime_id;
+    sql = """
+    SELECT world_id, step_num, FC.feature_id, name, env, change
+    FROM feature_changes AS FC
+    JOIN features AS F ON F.feature_id = FC.feature_id
+    JOIN spacetime AS S ON S.spacetime_id = FC.spacetime_id;
     """
     return get_df(db_path, sql)
 
 def get_interactions_df(
         db_path: str,
     ) -> pd.DataFrame:
-    sql = """SELECT interaction_id,
-                    interactions.network_id,
-                    I.name AS initiator,
-                    T.name AS target,
-                    i_anchor,
-                    t_anchor
-             FROM interactions
-             JOIN features AS I ON I.feature_id = interactions.initiator
-             JOIN features AS T ON T.feature_id = interactions.target
+    sql = """
+    SELECT interaction_id,
+           interactions.network_id,
+           I.name AS initiator,
+           T.name AS target,
+           i_anchor,
+           t_anchor
+    FROM interactions
+    JOIN features AS I ON I.feature_id = interactions.initiator
+    JOIN features AS T ON T.feature_id = interactions.target
     """
     return get_df(db_path, sql)
+
+def get_local_features_df(db_path: str, shadow: bool, world_id: int, site: str) -> pd.DataFrame:
+    # Fetch the phenotypes DataFrame for the specified parameters, but for all steps
+    phenotypes_df = get_phenotypes_df(
+        db_path=db_path,
+        shadow=shadow,
+        sites=site,
+        worlds=world_id
+    )
+    phenotypes_df['phenotype'] = phenotypes_df['phenotype'].str.split(':')
+    expanded = phenotypes_df.explode('phenotype')
+
+    expanded[['feature', 'trait']] = expanded['phenotype'].str.extract(r'(?P<feature>[^.]+)\.(?P<trait>[^.]+)')
+    aggregated = expanded.groupby(['feature', 'trait', 'step_num'], as_index=False)['pop'].sum()
+
+    return aggregated
+
+def get_payoffs_df(db_path: str, network_id: int) -> pd.DataFrame:
+    sql = f"""
+    SELECT p.interaction_id,
+           ife.name AS initiator_feature,
+           it.name AS initiator_trait,
+           tfe.name AS target_feature,
+           tt.name AS target_trait,
+           p.initiator_utils AS initiator_payoff,
+           p.target_utils AS target_payoff
+    FROM payoffs p
+    JOIN traits it ON p.initiator = it.trait_id
+    JOIN traits tt ON p.target = tt.trait_id
+    JOIN interactions i ON p.interaction_id = i.interaction_id
+    JOIN features ife ON i.initiator = ife.feature_id
+    JOIN features tfe ON i.target = tfe.feature_id
+    WHERE i.network_id = {network_id}
+    """
+    df = get_df(db_path, sql)
+    return df

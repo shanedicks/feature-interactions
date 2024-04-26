@@ -171,6 +171,7 @@ def env_report(world: "World"):
         print(s.pos, s.get_pop(), s.born - s.died, round(s.pop_cost, 2), utils)
 
 # Utilities
+
 def payoff_quantiles(interaction: "Interaction"):
     payoffs = [p for item in interaction.payoffs.values() for p in item.values()]
     count = len(payoffs)
@@ -225,6 +226,38 @@ def draw_age_hist(world: "World") -> None:
     ages = [a.age for a in world.schedule.agents]
     plt.hist(ages)
     plt.show()
+
+
+def env_feature_weight(feature_trait: str, agents_df, payoffs_df, base_env_utils) -> float:
+    """
+    Calculate the probability that any agent can interact with a specific environmental feature
+    trait at a given site, based on distributions of agent features and traits and the initial utility stock.
+
+    :param feature_trait: The feature trait (e.g., "F.a") for which to calculate the weight.
+    :param agents_df: DataFrame detailing agent traits and populations.
+    :param payoffs_df: DataFrame detailing payoffs for interactions.
+    :param base_env_utils: Initial utility stock for environmental features.
+    :return: The probability of interaction with the feature trait.
+    """
+    feature, trait = feature_trait.split('.')
+
+    pop = agents_df['pop'].sum()
+
+    in_edges_df = payoffs_df[(payoffs_df['target_feature'] == feature) & (payoffs_df['target_trait'] == trait)]
+
+    merged_df = in_edges_df.merge(agents_df, left_on=['initiator_feature', 'initiator_trait'], right_on=['feature', 'trait'])
+
+    # Calculate weighted impact for each initiator feature's trait
+    merged_df['weighted_impact'] = (merged_df['pop'] / pop) * merged_df['initiator_payoff']
+    avg_impact = merged_df.groupby(['initiator_feature', 'initiator_trait'])['weighted_impact'].sum().sum()
+
+    # Calculate interaction probability based on avg_impact and base utility stock
+    if avg_impact >= 0:
+        return 1
+    else:
+        num_ints = base_env_utils / -avg_impact  # Assuming base_env_utils is per feature trait
+        return min([num_ints/pop, 1])
+
 
 
 # Previously Site methods or based on Site objects - need reworking to handle input from Phenotypes db
