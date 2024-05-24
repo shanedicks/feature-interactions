@@ -489,6 +489,7 @@ class NetworkPlot(BasePlot):
         all_sites = set(site for world_sites in self.sites_dict.values() for site in world_sites)
 
         for nid in set(self.world_dict.values()):
+            networks_data = {}
             logging.info(f"Beginning network {nid}")
             for wid in [w for w, n in self.world_dict.items() if n == nid]:
                 logging.info(f"Beginning world {wid}")
@@ -706,10 +707,9 @@ def plot_world_data(df1, df2, world_ids, target_column):
         filtered_df1 = df1[df1['world_id'] == world_id]
         filtered_df2 = df2[df2['world_id'] == world_id]
 
-        plt.figure(figsize=(10, 6))
+        plt.figure(figsize=(6.5, 4.875))
 
         plt.plot(filtered_df1['step_num'], filtered_df1[target_column], label='DataFrame 1', color='blue')
-
         plt.plot(filtered_df2['step_num'], filtered_df2[target_column], label='DataFrame 2', color='gray')
 
         plt.title(f'World {world_id}: {target_column} over Steps')
@@ -718,62 +718,29 @@ def plot_world_data(df1, df2, world_ids, target_column):
         plt.legend()
         plt.show()
 
-class EvolutionaryActivityStatistics:
-    def __init__(self, dataframe):
-        self.df = dataframe
-
-    def calculate_diversity(self, by='role'):
-        diversity_df = self.df.groupby(['site_pos', 'step_num'])[by].nunique().reset_index(name='diversity')
-        return diversity_df
-
-    def calculate_total_cumulative_activity(self):
-        total_activity = self.df.groupby(['site_pos', 'step_num'])['pop'].sum().reset_index(name='total_activity')
-        return total_activity
-
-    def calculate_mean_cumulative_activity(self):
-        total_activity_df = self.calculate_total_cumulative_activity()
-        diversity_df = self.calculate_diversity()
-        merged_df = pd.merge(total_activity_df, diversity_df, on=['site_pos', 'step_num'])
-        merged_df['mean_activity'] = merged_df['total_activity'] / merged_df['diversity']
-        return merged_df[['step_num', 'site_pos', 'mean_activity']]
-
-    def calculate_new_evolutionary_activity(self):
-        pass
-
-
-def activity(df: pd.DataFrame, pivot: Callable) -> pd.DataFrame:
-    return df.pipe(pivot).notna().cumsum()
-
-def pop_activity(df: pd.DataFrame, pivot: Callable) -> pd.DataFrame:
-    return df.pipe(pivot).cumsum()
-
-def diversity(df: pd.DataFrame, pivot: Callable) -> pd.DataFrame:
-    return df.pipe(activity, pivot=pivot).apply(lambda x: x > 0).sum(axis = 1)
-
-def phenotype_pivot(df: pd.DataFrame) -> pd.DataFrame:
-    return pd.pivot_table(df, index='step_num', columns="phenotype", values="pop", aggfunc='sum')
-
-def role_pivot(df: pd.DataFrame) -> pd.DataFrame:
-    return pd.pivot_table(df, index='step_num', columns="role", values="pop", aggfunc='sum')
-
 def gen_activity_plots(
     df: pd.DataFrame,
     wd: Dict[int, int],
-    activity: Callable,
-    pivot: Callable,
+    activity_col: str,
+    entity_col: str,
     save: bool = False,
     suffix: str = '',
     dest: str = '',
     id_list: list = None
-    ) -> None:
+) -> None:
     if id_list is None:
         id_list = [i for i in df['world_id'].unique()]
+
     for i in id_list:
         n_id = wd[i]
         title = f"Network: {n_id} | World: {i}"
-        activity(df=df, pivot=pivot).plot(legend=False, title=title, xlabel="Step", ylabel="Activity")
+
+        activity_df = df[df['world_id'] == i]
+        activity_df.plot(x='step_num', y=activity_col, kind='scatter', s=0.1, alpha=0.2,
+                         title=title, xlabel="Step", ylabel="Activity", legend=False)
+
         if save:
-            plt.savefig(f"{dest}activity_n{n_id}w{i}{suffix}.png", dpi=300)
+            plt.savefig(f"{dest}{activity_col}_n{n_id}w{i}{suffix}.png", dpi=300)
             plt.close()
         else:
             plt.show()
