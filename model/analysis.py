@@ -9,6 +9,7 @@ import matplotlib.colors as mcolors
 import numpy as np
 import networkx as nx
 import pandas as pd
+import seaborn as sns
 import model.database as db
 import model.output as out
 from datetime import datetime
@@ -114,6 +115,77 @@ class PopulationPlot(BasePlot):
         ax.set_xlabel("Step", fontsize=10)
         ax.set_ylabel("Population", fontsize=10)
         ax.tick_params(axis='both', labelsize=10)
+
+class HeatmapPlot(BasePlot):
+
+    def plot(self, num_roles=30, num_bins=20, world=None):
+        worlds_to_plot = [(world, self.world_dict[world])] if world is not None else self.world_dict.items()
+        for shadow in [False, True]:
+            s = ["", "s_"][shadow]
+            for w, n in worlds_to_plot:
+                logging.info(f"Trying world {w}")
+                ph_df = db.get_phenotypes_df(self.db_path, shadow, worlds=w)
+                if not ph_df.empty:
+                    self.save_fig(ph_df, num_roles, num_bins, shadow, w, n)
+
+    def save_fig(
+        self,
+        df: pd.DataFrame,
+        num_roles: int,
+        num_bins: int,
+        shadow: bool,
+        w: int,
+        n: int
+    ) -> None:
+        s = ["", "s_"][shadow]
+        prefix = f"{s}role_heatmap"
+        title = f"Population Heatmap for Top Roles (Log10 Scale)\n Network:{n} | World: {w}"
+        pivot_data = self.create_pivot(df, num_roles, num_bins)
+        self.plot_heatmap(pivot_data, title)
+        plt.savefig(f"{self.plot_dir}/{prefix}_n{n}w{w}.png", dpi=300)
+        plt.close()
+
+    def create_pivot(self, df: pd.DataFrame, num_roles: int, num_bins: int) -> pd.DataFrame:
+        top_roles = df.groupby('role')['pop'].sum().nlargest(num_roles).index
+        df['step_bin'] = pd.cut(df['step_num'], bins=num_bins)
+        pivot_data = df.pivot_table(index='role', columns='step_bin', values='pop', aggfunc='sum')
+        pivot_data = np.log10(pivot_data + 1)
+        pivot_data = pivot_data.reindex(index=top_roles)
+        return pivot_data
+
+    def plot_heatmap_old(self, df: pd.DataFrame, title: str) -> None:
+        plt.figure(figsize=(6.5, 4.875))
+        sns.heatmap(df, cmap='viridis', cbar_kws={'label': 'Log10(Population)'}, yticklabels=True)
+        plt.title(title)
+        plt.xlabel("Step Range")
+        plt.ylabel("Role")
+        plt.yticks(rotation=0, ha='right')
+
+        plt.xticks([])
+
+        plt.tight_layout()
+
+    def plot_heatmap(self, df: pd.DataFrame, title: str) -> None:
+        fig_width = 6.5
+        fig_height_per_role = 0.2
+        num_roles = len(df.index)
+        fig_height = num_roles * fig_height_per_role
+
+        plt.figure(figsize=(fig_width, fig_height))
+
+        sns.heatmap(df, cmap='viridis', cbar_kws={'label': 'Log10(Population)'}, yticklabels=True)
+
+        plt.title(title)
+        plt.xlabel("Step Range")
+        plt.ylabel("Role")
+        plt.xticks([])
+        plt.yticks(rotation=0, ha='right')
+        plt.title(title, fontsize=12)
+        plt.xlabel("Step Range", fontsize=10)
+        plt.ylabel("Role", fontsize=10)
+        plt.yticks(fontsize=8)
+        plt.tight_layout()
+
 
 class ModelVarsPlot(BasePlot):
 
@@ -662,18 +734,21 @@ def add_evolutionary_activity_columns(df):
     df['role_activity'] = df.groupby(['world_id', 'role'])['role_step'].transform(lambda x: pd.factorize(x)[0] + 1)
     df = df.drop('role_step', axis=1)
 
-    df['role_pop'] = df.groupby(['world_id', 'step_num', 'role'])['pop'].transform('sum')
-    df['role_cum_pop'] = df.groupby(['world_id', 'role'])['role_pop'].cumsum()
-    df = df.drop('role_pop', axis=1)
+    role_pop_df = df.groupby(['world_id', 'step_num', 'role'])['pop'].sum().reset_index()
+    role_pop_df['role_cum_pop'] = role_pop_df.groupby(['world_id', 'role'])['pop'].cumsum()
+    df = pd.merge(df, role_pop_df[['world_id', 'step_num', 'role', 'role_cum_pop']], on=['world_id', 'step_num', 'role'], how='left')
+
+    #df = df.drop('role_pop', axis=1)
 
     return df
 
 def calculate_evolutionary_activity_stats(df):
     grouped = df.groupby(['world_id', 'step_num'])
-
     phenotype_acum = grouped['phenotype_activity'].sum()
+    phenotype_pcum = grouped['phenotype_cum_pop'].sum()
     phenotype_nunique = grouped['phenotype'].nunique()
     role_acum = grouped['role_activity'].sum()
+    role_pcum = grouped['role_cum_pop'].sum()
     role_nunique = grouped['role'].nunique()
 
     phenotype_entropy = []
@@ -692,8 +767,12 @@ def calculate_evolutionary_activity_stats(df):
         'step_num': phenotype_acum.index.get_level_values('step_num'),
         'phenotype_acum': phenotype_acum,
         'phenotype_acum_mean': phenotype_acum / phenotype_nunique,
+        'phenotype_pcum': phenotype_pcum,
+        'phenotype_pcum_mean': phenotype_pcum / phenotype_nunique,
         'role_acum': role_acum,
         'role_acum_mean': role_acum / role_nunique,
+        'role_pcum': role_pcum,
+        'role_pcum_mean': role_pcum / role_nunique,
         'phenotype_diversity': phenotype_nunique,
         'role_diversity': role_nunique,
         'phenotype_entropy': phenotype_entropy,
@@ -722,7 +801,6 @@ def gen_activity_plots(
     df: pd.DataFrame,
     wd: Dict[int, int],
     activity_col: str,
-    entity_col: str,
     save: bool = False,
     suffix: str = '',
     dest: str = '',
