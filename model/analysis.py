@@ -738,8 +738,6 @@ def add_evolutionary_activity_columns(df):
     role_pop_df['role_cum_pop'] = role_pop_df.groupby(['world_id', 'role'])['pop'].cumsum()
     df = pd.merge(df, role_pop_df[['world_id', 'step_num', 'role', 'role_cum_pop']], on=['world_id', 'step_num', 'role'], how='left')
 
-    #df = df.drop('role_pop', axis=1)
-
     return df
 
 def calculate_evolutionary_activity_stats(df):
@@ -781,15 +779,15 @@ def calculate_evolutionary_activity_stats(df):
 
     return stats_df
 
-def plot_world_data(df1, df2, world_ids, target_column):
+def plot_world_data(df, shadow_df, world_ids, target_column):
     for world_id in world_ids:
         filtered_df1 = df1[df1['world_id'] == world_id]
         filtered_df2 = df2[df2['world_id'] == world_id]
 
         plt.figure(figsize=(6.5, 4.875))
 
-        plt.plot(filtered_df1['step_num'], filtered_df1[target_column], label='DataFrame 1', color='blue')
-        plt.plot(filtered_df2['step_num'], filtered_df2[target_column], label='DataFrame 2', color='gray')
+        plt.plot(filtered_df1['step_num'], filtered_df1[target_column], label='Selection Model', color='blue')
+        plt.plot(filtered_df2['step_num'], filtered_df2[target_column], label='Neutral Shadow Model', color='gray')
 
         plt.title(f'World {world_id}: {target_column} over Steps')
         plt.xlabel('Step Number')
@@ -841,8 +839,96 @@ def CAD_plot(
     CAD = CAD / total
     sCAD = sCAD / total
 
-    CAD.plot(loglog=True, title=title)
-    sCAD.plot(loglog=True, title=title)
+    CAD.ewm(span=2000).mean().plot(loglog=True, title=title)
+    sCAD.ewm(span=2000).mean().plot(loglog=True, title=title)
+    plt.show()
+
+class EvolutionaryActivityStatsPlot(BasePlot):
+    def __init__(self, db_loc: str, db_name: str, output_directory: str) -> None:
+        super().__init__(db_loc, db_name, output_directory)
+        self.world_dict = db.get_world_dict(self.db_path)
+
+    def plot(self, columns_to_plot=None):
+        if columns_to_plot is None:
+            columns_to_plot = [
+                'phenotype_acum', 'phenotype_acum_mean', 'phenotype_pcum', 'phenotype_pcum_mean',
+                'role_acum', 'role_acum_mean', 'role_pcum', 'role_pcum_mean',
+                'phenotype_diversity', 'role_diversity', 'phenotype_entropy', 'role_entropy'
+            ]
+
+        for world_id, network_id in self.world_dict.items():
+            df = db.get_phenotypes_df(self.db_path, shadow=False, worlds=world_id)
+            s_df = db.get_phenotypes_df(self.db_path, shadow=True, worlds=world_id)
+
+            if df.empty or s_df.empty:
+                continue
+
+            df = add_evolutionary_activity_columns(df)
+            s_df = add_evolutionary_activity_columns(s_df)
+
+            stats_df = calculate_evolutionary_activity_stats(df)
+            s_stats_df = calculate_evolutionary_activity_stats(s_df)
+
+            self.plot_stats(stats_df, s_stats_df, world_id, network_id, columns_to_plot)
+
+    def plot_stats(self, stats_df: pd.DataFrame, s_stats_df: pd.DataFrame, world_id: int, network_id: int, columns_to_plot: List[str]):
+        for column in columns_to_plot:
+            plt.figure(figsize=(6.5, 4.875))
+            plt.plot(stats_df['step_num'], stats_df[column], label='Selection')
+            plt.plot(s_stats_df['step_num'], s_stats_df[column], label='Neutral Shadow')
+            plt.title(f"{column.replace('_', ' ').title()}\nNetwork: {network_id}, World: {world_id}")
+            plt.xlabel("Step")
+            plt.ylabel(column.replace('_', ' ').title())
+            plt.legend()
+
+            filename = f"{self.plot_dir}/{column}_n{network_id}w{world_id}.png"
+            plt.savefig(filename, dpi=300)
+            plt.close()
+
+class CADPlot(BasePlot):
+    def __init__(self, db_loc: str, db_name: str, output_directory: str) -> None:
+        super().__init__(db_loc, db_name, output_directory)
+        self.world_dict = db.get_world_dict(self.db_path)
+
+    def plot(self, activity_columns=None):
+        if activity_columns is None:
+            activity_columns = ['phenotype_activity', 'phenotype_cum_pop', 'role_activity', 'role_cum_pop']
+
+        for world_id, network_id in self.world_dict.items():
+            df = db.get_phenotypes_df(self.db_path, shadow=False, worlds=world_id)
+            s_df = db.get_phenotypes_df(self.db_path, shadow=True, worlds=world_id)
+
+            if df.empty or s_df.empty:
+                continue
+
+            df = add_evolutionary_activity_columns(df)
+            s_df = add_evolutionary_activity_columns(s_df)
+
+            for column in activity_columns:
+                self.plot_cad(df, s_df, column, world_id, network_id)
+
+    def plot_cad(self, df: pd.DataFrame, s_df: pd.DataFrame, activity_col: str, world_id: int, network_id: int):
+        plt.figure(figsize=(6.5, 4.875))
+
+        CAD = get_CAD(df, activity_col).sum()
+        sCAD = get_CAD(s_df, activity_col).sum()
+
+        total = CAD.sum() + sCAD.sum()
+
+        CAD = CAD / total
+        sCAD = sCAD / total
+
+        CAD.ewm(span=2000).mean().plot(loglog=True, label='Selection', color='blue')
+        sCAD.ewm(span=2000).mean().plot(loglog=True, label='Neutral Shadow', color='gray')
+
+        plt.title(f"CAD Plot: {activity_col.replace('_', ' ').title()}\nNetwork: {network_id}, World: {world_id}")
+        plt.xlabel("Activity")
+        plt.ylabel("Cumulative Frequency")
+        plt.legend()
+
+        filename = f"{self.plot_dir}/cad_{activity_col}_n{network_id}w{world_id}.png"
+        plt.savefig(filename, dpi=300)
+        plt.close()
 
 
 def create_indexes(db_loc, db_name):
