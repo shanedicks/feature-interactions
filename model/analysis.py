@@ -874,8 +874,8 @@ class EvolutionaryActivityStatsPlot(BasePlot):
     def plot_stats(self, stats_df: pd.DataFrame, s_stats_df: pd.DataFrame, world_id: int, network_id: int, columns_to_plot: List[str]):
         for column in columns_to_plot:
             plt.figure(figsize=(6.5, 4.875))
-            plt.plot(stats_df['step_num'], stats_df[column], label='Selection')
-            plt.plot(s_stats_df['step_num'], s_stats_df[column], label='Neutral Shadow')
+            plt.plot(stats_df['step_num'], stats_df[column], label='Selection', color='blue')
+            plt.plot(s_stats_df['step_num'], s_stats_df[column], label='Neutral Shadow', color='gray')
             plt.title(f"{column.replace('_', ' ').title()}\nNetwork: {network_id}, World: {world_id}")
             plt.xlabel("Step")
             plt.ylabel(column.replace('_', ' ').title())
