@@ -569,7 +569,7 @@ class World(Model):
 
         # Enumerate over all possible combinations of world ID, steps, and sites.
         return enumerate(
-            [(self.world_id, step, str(site)) for step in range(max_steps + 1) for site in sites],
+            [(self.world_id, step, str(site)) for step in range(1, max_steps + 1) for site in sites],
             start=start)
 
     def get_spacetime_dict(self) -> Dict[Union[str, tuple], int]:

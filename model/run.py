@@ -167,8 +167,6 @@ class Controller():
                                     world_params['feature_mutate_chance'],
                                     world_params['feature_create_chance'],
                                     world_params['feature_gain_chance'],
-                                    world_params['feature_timeout'],
-                                    world_params['trait_timeout'],
                                     world_params['init_agents'],
                                     world_params['base_agent_utils'],
                                     world_params['base_env_utils'],
@@ -180,6 +178,8 @@ class Controller():
                                     world_params['mortality'],
                                     world_params['move_chance'],
                                     world_params['snap_interval'],
+                                    world_params['feature_timeout'],
+                                    world_params['trait_timeout'],
                                     world_params['target_sample'],
                                     network_id
                                 )
@@ -268,8 +268,6 @@ class Controller():
                             world_params['feature_mutate_chance'],
                             world_params['feature_create_chance'],
                             world_params['feature_gain_chance'],
-                            world_params['feature_timeout'],
-                            world_params['trait_timeout'],
                             world_params['init_agents'],
                             world_params['base_agent_utils'],
                             world_params['base_env_utils'],
@@ -281,6 +279,8 @@ class Controller():
                             world_params['mortality'],
                             world_params['move_chance'],
                             world_params['snap_interval'],
+                            world_params['feature_timeout'],
+                            world_params['trait_timeout'],
                             world_params['target_sample'],
                             network_id
                         )

@@ -352,6 +352,15 @@ class Manager():
 def get_connection(db_path: str) -> sqlite3.Connection:
     return sqlite3.connect(db_path)
 
+def align_step_nums(df):
+    if 'step_num' in df.columns:
+        steps = df['step_num'].unique()
+        if len(steps) > 1:
+            data_interval = steps[1] - steps[0]
+            if steps[0] % data_interval != 0:
+                df['step_num'] = df['step_num'] + 1
+    return df
+
 def get_df(db_path: str, sql: str, dtype: Optional[Dict[str, str]] = None) -> pd.DataFrame:
     conn = get_connection(db_path)
     if dtype is None:
@@ -359,6 +368,7 @@ def get_df(db_path: str, sql: str, dtype: Optional[Dict[str, str]] = None) -> pd
     else:
         df = pd.read_sql_query(sql, conn, dtype=dtype)
     conn.close()
+    df = align_step_nums(df)
     return df
 
 def create_indexes(db_path: str) -> None:
@@ -582,3 +592,54 @@ def get_payoffs_df(db_path: str, network_id: int) -> pd.DataFrame:
     """
     df = get_df(db_path, sql)
     return df
+
+def migrate_broken_tables(db_path):
+    conn = get_connection(db_path)
+    cursor = conn.cursor()
+    # Create temporary table with correct column order
+    cursor.execute('''
+    CREATE TABLE worlds_temp (
+        world_id INTEGER PRIMARY KEY,
+        trait_mutate_chance REAL NOT NULL,
+        trait_create_chance REAL NOT NULL,
+        feature_mutate_chance REAL NOT NULL,
+        feature_create_chance REAL NOT NULL,
+        feature_gain_chance REAL NOT NULL,
+        init_agents INTEGER NOT NULL,
+        base_agent_utils REAL NOT NULL,
+        base_env_utils REAL NOT NULL,
+        total_pop_limit INTEGER NOT NULL,
+        pop_cost_exp REAL NOT NULL,
+        feature_cost_exp REAL NOT NULL,
+        grid_size INTEGER NOT NULL,
+        repr_multi INTEGER NOT NULL,
+        mortality REAL NOT NULL,
+        move_chance REAL NOT NULL,
+        snap_interval INTEGER NOT NULL,
+        feature_timeout INTEGER NOT NULL,
+        trait_timeout INTEGER NOT NULL,
+        target_sample INTEGER NOT NULL,
+        network_id INTEGER NOT NULL
+    )
+    ''')
+    # Copy data from the original table to the temporary table
+    cursor.execute('''
+    INSERT INTO worlds_temp (
+        world_id, trait_mutate_chance, trait_create_chance, 
+        feature_mutate_chance, feature_create_chance, feature_gain_chance,
+        feature_timeout, trait_timeout,
+        init_agents, base_agent_utils, base_env_utils, total_pop_limit, 
+        pop_cost_exp, feature_cost_exp, grid_size, repr_multi, 
+        mortality, move_chance, snap_interval, 
+        target_sample, network_id
+    ) 
+    SELECT * FROM worlds
+    ''')
+    # Drop the original table
+    cursor.execute('DROP TABLE worlds')
+    # Rename the temporary table
+    cursor.execute('ALTER TABLE worlds_temp RENAME TO worlds')
+    # Increment step_num
+    cursor.execute('UPDATE spacetime SET step_num = step_num + 1')
+    conn.commit()
+    conn.close()

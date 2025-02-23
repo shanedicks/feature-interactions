@@ -30,6 +30,7 @@ class BasePlot:
         self.output_directory = output_directory
         self.plot_dir = self.get_or_create_output_directory()
         self.world_dict = db.get_world_dict(self.db_path)
+        self.params = db.get_params_df(self.db_path)
 
     def get_or_create_output_directory(self):
         output_path = os.path.join(self.db_loc, self.output_directory)
@@ -188,33 +189,39 @@ class HeatmapPlot(BasePlot):
 
 
 class ModelVarsPlot(BasePlot):
+    DEFAULT_PLOT_COLUMNS = {
+        "pop": "Population",
+        "total_utility": "Agent Total Utility",
+        "mean_utility": "Agent Mean Utility",
+        "med_utility": "Agent Median Utility",
+        "num_types": "Number of Phenotypes",
+        "num_roles": "Number of Roles",
+        "num_features": "Number of Features",
+        "agent_int": "Agent/Agent Interactions",
+        "env_int": "Agent/Environment Interactions",
+    }
 
-    def plot(self):
+    def plot(self, network: List[int] = None, plot_columns: List[Tuple[str, str]] = None):
         nd = {
             i: [j for j in self.world_dict if self.world_dict[j] == i]
             for i in self.world_dict.values()
         }
+
+        if network is not None:
+            nd = {k: v for k, v in nd.items() if k in network}
         mv_df = db.get_model_vars_df(self.db_path)
-        plot_columns = [
-            ("Population", "pop"),
-            ("Agent Total Utility", "total_utility"),
-            ("Agent Mean Utility", "mean_utility"),
-            ("Agent Median Utility", "med_utility"),
-            ("Number of Phenotypes", "num_types"),
-            ("Number of Roles", "num_roles"),
-            ("Number of Features", "num_features"),
-            ("Agent/Agent Interactions", "agent_int"),
-            ("Agent/Environment Interactions", "env_int"),
-        ]
-        for name, column in plot_columns:
+
+        plot_columns = columns if columns is not None else list(self.DEFAULT_PLOT_COLUMNS.keys())
+
+        for column in plot_columns:
             try:
                 df = mv_df.pivot(index='step_num', columns='world_id', values=column).fillna(0)
             except KeyError as e:
                 logging.error(e)
                 continue
             for n in nd:
-                title = f"{name} Over Time\n Network {n}"
                 try:
+                    name = self.DEFAULT_PLOT_COLUMNS[column]
                     title = f"{name} Over Time\n Network {n}"
                     fig, ax = plt.subplots(figsize=(6.5, 3.656))  # Creates both figure and axes with the specified size
                     df[nd[n]].ewm(span=100).mean().plot(ax=ax)  # Use the created axes for plotting
@@ -725,18 +732,35 @@ def shannon_entropy(proportions: List[float]):
     entropy = -np.sum(nonzero_proportions * np.log2(nonzero_proportions))
     return entropy
 
-def add_evolutionary_activity_columns(df):
-
+def add_evolutionary_activity_columns(df, snap_interval=None):
     df['phenotype_activity'] = df.groupby(['world_id', 'phenotype']).cumcount() + 1
     df['phenotype_cum_pop'] = df.groupby(['world_id', 'phenotype'])['pop'].cumsum()
+
+    df['phenotype_expected_prop'] = df.groupby(['world_id', 'phenotype'])['pop'].shift(1) / df.groupby(['world_id', 'step_num'])['pop'].transform('sum').groupby(df['world_id']).shift(1)
+    df['phenotype_observed_prop'] = df['pop'] / df.groupby(['world_id', 'step_num'])['pop'].transform('sum')
+    df['phenotype_delta_N'] = np.where(df['phenotype_observed_prop'] > df['phenotype_expected_prop'],
+                                    df.groupby(['world_id', 'step_num'])['pop'].transform('sum') *
+                                    (df['phenotype_observed_prop'] - df['phenotype_expected_prop'])**2,
+                                    0)
+    df = df.drop(['phenotype_expected_prop', 'phenotype_observed_prop'], axis=1)
 
     df['role_step'] = df.groupby(['world_id', 'role', 'step_num']).ngroup()
     df['role_activity'] = df.groupby(['world_id', 'role'])['role_step'].transform(lambda x: pd.factorize(x)[0] + 1)
     df = df.drop('role_step', axis=1)
 
-    role_pop_df = df.groupby(['world_id', 'step_num', 'role'])['pop'].sum().reset_index()
-    role_pop_df['role_cum_pop'] = role_pop_df.groupby(['world_id', 'role'])['pop'].cumsum()
-    df = pd.merge(df, role_pop_df[['world_id', 'step_num', 'role', 'role_cum_pop']], on=['world_id', 'step_num', 'role'], how='left')
+    df['role_pop'] = df.groupby(['world_id', 'step_num', 'role'])['pop'].transform('sum')
+    df['role_cum_pop'] = df.groupby(['world_id', 'role'])['pop'].transform('cumsum')
+
+    df['role_expected_prop'] = df.groupby(['world_id', 'role'])['role_pop'].shift(1) / df.groupby(['world_id', 'step_num'])['pop'].transform('sum').groupby(df['world_id']).shift(1)
+    df['role_observed_prop'] = df['role_pop'] / df.groupby(['world_id', 'step_num'])['pop'].transform('sum')
+    df['role_delta_N'] = np.where(df['role_observed_prop'] > df['role_expected_prop'],
+                               df.groupby(['world_id', 'step_num'])['pop'].transform('sum') *
+                               (df['role_observed_prop'] - df['role_expected_prop'])**2,
+                               0)
+    df = df.drop(['role_expected_prop', 'role_observed_prop', 'role_pop'], axis=1)
+    if snap_interval is not None:
+        df.loc[df['step_num'] % snap_interval == 0, 'role_delta_N'] = 0
+        df.loc[df['step_num'] % snap_interval == 0, 'phenotype_delta_N'] = 0
 
     return df
 
@@ -748,6 +772,8 @@ def calculate_evolutionary_activity_stats(df):
     role_acum = grouped['role_activity'].sum()
     role_pcum = grouped['role_cum_pop'].sum()
     role_nunique = grouped['role'].nunique()
+    phenotype_delta_N = grouped['phenotype_delta_N'].sum()
+    role_delta_N = grouped['role_delta_N'].sum()
 
     phenotype_entropy = []
     role_entropy = []
@@ -774,20 +800,22 @@ def calculate_evolutionary_activity_stats(df):
         'phenotype_diversity': phenotype_nunique,
         'role_diversity': role_nunique,
         'phenotype_entropy': phenotype_entropy,
-        'role_entropy': role_entropy
+        'role_entropy': role_entropy,
+        'phenotype_delta_N': phenotype_delta_N,
+        'role_delta_N': role_delta_N
     })
 
     return stats_df
 
 def plot_world_data(df, shadow_df, world_ids, target_column):
     for world_id in world_ids:
-        filtered_df1 = df1[df1['world_id'] == world_id]
-        filtered_df2 = df2[df2['world_id'] == world_id]
+        filtered_df = df[df['world_id'] == world_id]
+        filtered_shadow_df = shadow_df[shadow_df['world_id'] == world_id]
 
         plt.figure(figsize=(6.5, 4.875))
 
-        plt.plot(filtered_df1['step_num'], filtered_df1[target_column], label='Selection Model', color='blue')
-        plt.plot(filtered_df2['step_num'], filtered_df2[target_column], label='Neutral Shadow Model', color='gray')
+        plt.plot(filtered_df['step_num'], filtered_df[target_column], label='Selection Model', color='blue')
+        plt.plot(filtered_shadow_df['step_num'], filtered_shadow_df[target_column], label='Neutral Shadow Model', color='gray')
 
         plt.title(f'World {world_id}: {target_column} over Steps')
         plt.xlabel('Step Number')
@@ -839,21 +867,21 @@ def CAD_plot(
     CAD = CAD / total
     sCAD = sCAD / total
 
-    CAD.ewm(span=2000).mean().plot(loglog=True, title=title)
-    sCAD.ewm(span=2000).mean().plot(loglog=True, title=title)
+    CAD.plot(loglog=True, title=title)
+    sCAD.plot(loglog=True, title=title)
     plt.show()
 
 class EvolutionaryActivityStatsPlot(BasePlot):
     def __init__(self, db_loc: str, db_name: str, output_directory: str) -> None:
         super().__init__(db_loc, db_name, output_directory)
-        self.world_dict = db.get_world_dict(self.db_path)
 
     def plot(self, columns_to_plot=None):
         if columns_to_plot is None:
             columns_to_plot = [
                 'phenotype_acum', 'phenotype_acum_mean', 'phenotype_pcum', 'phenotype_pcum_mean',
                 'role_acum', 'role_acum_mean', 'role_pcum', 'role_pcum_mean',
-                'phenotype_diversity', 'role_diversity', 'phenotype_entropy', 'role_entropy'
+                'phenotype_diversity', 'role_diversity', 'phenotype_entropy', 'role_entropy',
+                'phenotype_delta_N', 'role_delta_N'
             ]
 
         for world_id, network_id in self.world_dict.items():
@@ -918,8 +946,8 @@ class CADPlot(BasePlot):
         CAD = CAD / total
         sCAD = sCAD / total
 
-        CAD.ewm(span=2000).mean().plot(loglog=True, label='Selection', color='blue')
-        sCAD.ewm(span=2000).mean().plot(loglog=True, label='Neutral Shadow', color='gray')
+        CAD.plot(loglog=True, label='Selection', color='blue')
+        sCAD.plot(loglog=True, label='Neutral Shadow', color='gray')
 
         plt.title(f"CAD Plot: {activity_col.replace('_', ' ').title()}\nNetwork: {network_id}, World: {world_id}")
         plt.xlabel("Activity")
@@ -931,16 +959,9 @@ class CADPlot(BasePlot):
         plt.close()
 
 
-def create_indexes(db_loc, db_name):
+def database_cleanup(db_loc, db_name):
     db_path = os.path.join(db_loc, db_name)
-    db.create_indexes(db_path)
-
-def drop_phenotype_phenotype_index(db_loc, db_name):
-    conn = db.get_connection()
-    cursor = conn.cursor
-    cursor.execute("DROP INDEX IF EXISTS idx_phenotypes_phenotype")
-    conn.commit()
-    conn.close()
+    db.migrate_broken_tables(db_path)
 
 def validate_and_convert_floats(G):
     for _, node_data in G.nodes(data=True):
