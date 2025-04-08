@@ -352,15 +352,6 @@ class Manager():
 def get_connection(db_path: str) -> sqlite3.Connection:
     return sqlite3.connect(db_path)
 
-def align_step_nums(df):
-    if 'step_num' in df.columns:
-        steps = df['step_num'].unique()
-        if len(steps) > 1:
-            data_interval = steps[1] - steps[0]
-            if steps[0] % data_interval != 0:
-                df['step_num'] = df['step_num'] + 1
-    return df
-
 def get_df(db_path: str, sql: str, dtype: Optional[Dict[str, str]] = None) -> pd.DataFrame:
     conn = get_connection(db_path)
     if dtype is None:
@@ -368,7 +359,6 @@ def get_df(db_path: str, sql: str, dtype: Optional[Dict[str, str]] = None) -> pd
     else:
         df = pd.read_sql_query(sql, conn, dtype=dtype)
     conn.close()
-    df = align_step_nums(df)
     return df
 
 def create_indexes(db_path: str) -> None:
