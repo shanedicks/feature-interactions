@@ -18,12 +18,26 @@ from typing import Any, Dict, List, Set, Tuple, Iterator, Callable, Optional
 from tqdm import tqdm
 
 class BasePlot:
+    """
+    Base class for creating visualization plots from simulation data.
+
+    Handles database connection and output directory management that's common
+    across all plot types.
+    """
     def __init__(
         self,
         db_loc: str,
         db_name: str,
         output_directory: str,
     ) -> None:
+        """
+        Initialize the plot generator with database and output settings.
+
+        Args:
+            db_loc: Directory containing the database file
+            db_name: Name of the database file
+            output_directory: Directory where plots will be saved
+        """
         self.db_loc = db_loc
         self.db_name = db_name
         self.db_path = os.path.join(db_loc, db_name)
@@ -40,9 +54,22 @@ class BasePlot:
 
 
 class PopulationPlot(BasePlot):
+    """
+    Generates plots showing population distributions over time for different
+    phenotypes and roles in the simulation.
+    """
 
     def plot(self, plot_type = 'area', num_types = 1000, world=None):
+        """
+        Create population distribution plots for phenotypes and roles.
+
+        Args:
+            plot_type: Type of plot to generate ('area' or 'line')
+            num_types: Maximum number of phenotypes to include in the plot
+            world: Specific world ID to plot, or None for all worlds
+        """
         worlds_to_plot = [(world, self.world_dict[world])] if world is not None else self.world_dict.items()
+        # Process both actual (shadow=False) and shadow model (neutral baseline) data
         for shadow in [False, True]:
             s = ["", "s_"][shadow]
             for w, n in worlds_to_plot:
@@ -52,6 +79,7 @@ class PopulationPlot(BasePlot):
                     self.save_pivot_fig(ph_df, self.role_pivot, plot_type, shadow, w, n)
                     m = ph_df.groupby('phenotype')['pop'].sum()
                     phenotypes = tuple(m.nlargest(num_types).index)
+                    # Convert single item tuple to scalar for compatibility with get_phenotypes_df API
                     if len(phenotypes) == 1:
                         phenotypes = phenotypes[0]
                     ph_df = db.get_phenotypes_df(
@@ -118,8 +146,21 @@ class PopulationPlot(BasePlot):
         ax.tick_params(axis='both', labelsize=10)
 
 class HeatmapPlot(BasePlot):
+    """
+    Generates heatmap visualizations of role population distributions over time.
+    These heatmaps show the changing prominence of different roles throughout
+    the simulation.
+    """
 
     def plot(self, num_roles=30, num_bins=20, world=None):
+        """
+        Create heatmap visualizations for role populations across time.
+
+        Args:
+            num_roles: Number of top roles to include in the heatmap
+            num_bins: Number of time bins to use for the x-axis
+            world: Specific world ID to plot, or None for all worlds
+        """
         worlds_to_plot = [(world, self.world_dict[world])] if world is not None else self.world_dict.items()
         for shadow in [False, True]:
             s = ["", "s_"][shadow]
@@ -189,6 +230,11 @@ class HeatmapPlot(BasePlot):
 
 
 class ModelVarsPlot(BasePlot):
+    """
+    Generates plots for various model variables over time, such as population,
+    utility measures, number of phenotypes/roles, and interaction counts.
+    """
+    # Mapping between database column names and human-readable plot labels
     DEFAULT_PLOT_COLUMNS = {
         "pop": "Population",
         "total_utility": "Agent Total Utility",
@@ -202,6 +248,14 @@ class ModelVarsPlot(BasePlot):
     }
 
     def plot(self, network: List[int] = None, plot_columns: List[Tuple[str, str]] = None):
+        """
+        Create plots for selected model variables in specific networks.
+
+        Args:
+            network: List of network IDs to plot, or None for all networks
+            plot_columns: List of column names to plot, or None for default columns
+        """
+        # Group worlds by their network ID for visualization
         nd = {
             i: [j for j in self.world_dict if self.world_dict[j] == i]
             for i in self.world_dict.values()
@@ -238,8 +292,63 @@ class ModelVarsPlot(BasePlot):
                     logging.error(e)
                     continue
 
+    def plot_all_networks(self, plot_columns: List[Tuple[str, str]] = None):
+        """
+        Create combined plots showing all networks for each selected model variable.
+
+        Args:
+            plot_columns: List of column names to plot, or None for default columns
+        """
+        mv_df = db.get_model_vars_df(self.db_path)
+
+        plot_columns = plot_columns if plot_columns is not None else list(self.DEFAULT_PLOT_COLUMNS.keys())
+
+        for column in plot_columns:
+            try:
+                df = mv_df.pivot(index='step_num', columns='world_id', values=column).fillna(0)
+            except KeyError as e:
+                logging.error(e)
+                continue
+
+            fig, ax = plt.subplots(figsize=(6.5, 3.656))
+
+            network_ids = set(self.world_dict.values())
+            cmap = plt.cm.get_cmap('tab20', len(network_ids))
+            network_colors = {nid: cmap(i % 20) for i, nid in enumerate(sorted(network_ids))}
+
+            for world_id, network_id in self.world_dict.items():
+                if world_id in df.columns:
+                    base_color = network_colors[network_id]
+                    color_variation = 0.8 + (world_id % 20) / 100
+                    world_color = [min(1.0, c * color_variation) for c in base_color]
+
+                    df[world_id].ewm(span=100).mean().plot(
+                        ax=ax,
+                        color=world_color,
+                        label=f"N{network_id}/W{world_id}"
+                    )
+
+            name = self.DEFAULT_PLOT_COLUMNS.get(column, column)
+            title = f"{name} Over Time (All Networks)"
+            ax.set_title(title, fontsize=12)
+            ax.set_xlabel("Step", fontsize=10)
+            ax.set_ylabel(name, fontsize=10)
+            ax.tick_params(axis='both', which='major', labelsize=10)
+            if len(df.columns) > 10:
+                ax.legend(fontsize=8, ncol=2)
+            else:
+                ax.legend(fontsize=10)
+            plt.tight_layout()
+            plt.savefig(f"{self.plot_dir}/{column}_all_networks.png", dpi=300)
+            plt.close(fig)
+
 
 class PayoffPlot(BasePlot):
+    """
+    Generates visualizations of payoff distributions from agent interactions.
+    Shows relationships between initiator and target payoffs across different
+    interaction types.
+    """
 
     def __init__(
         self,
@@ -251,6 +360,13 @@ class PayoffPlot(BasePlot):
         self.interactions_df = db.get_interactions_df(self.db_path)
 
     def plot(self, plot_type, network_ids=None):
+        """
+        Create payoff distribution plots for specified networks.
+
+        Args:
+            plot_type: Type of visualization ('scatter' or 'box_and_whisker')
+            network_ids: Specific network IDs to plot, or None for all networks
+        """
         # If network_ids is not provided, plot for all unique network IDs
         if network_ids is None:
             network_ids = self.interactions_df['network_id'].unique()
@@ -319,6 +435,10 @@ class PayoffPlot(BasePlot):
         plt.show()
 
 class NetworkPlot(BasePlot):
+    """
+    Generates network visualizations showing relationships between features and roles.
+    Provides both static network plots and time-series visualizations of evolving networks.
+    """
 
     def __init__(
         self,
@@ -420,6 +540,10 @@ class NetworkPlot(BasePlot):
         return G
 
     def export_features_networks_to_json(self) -> None:
+        """
+        Export feature network data to JSON format for all worlds and networks.
+        Creates a single JSON file containing all network structures.
+        """
         fc_df = self.feature_changes_df
         i_df = self.interactions_df
 
@@ -480,6 +604,15 @@ class NetworkPlot(BasePlot):
         steps: Optional[List[int]] = None,
         num_plots: Optional[int] = None
         ) -> None:
+        """
+        Generate visualizations of feature networks for specified simulation steps.
+
+        Args:
+            network_ids: List of specific network IDs to plot, or None for all
+            world_ids: List of specific world IDs to plot, or None for all
+            steps: Specific steps to plot, or None for automatic selection
+            num_plots: Number of evenly-spaced timesteps to plot, or None for all
+        """
         
         json_file_path = os.path.join(self.db_loc, "features_networks_data.json")
         if not os.path.isfile(json_file_path):
@@ -564,6 +697,10 @@ class NetworkPlot(BasePlot):
         return G
 
     def export_role_networks_to_json(self) -> None:
+        """
+        Export role network data to JSON format for all worlds and networks.
+        Creates one JSON file per network containing role network structures.
+        """
         i_df = self.interactions_df
         all_sites = set(site for world_sites in self.sites_dict.values() for site in world_sites)
 
@@ -667,7 +804,16 @@ class NetworkPlot(BasePlot):
         world_ids: Optional[List[int]] = None,
         steps: Optional[List[int]] = None,
         num_plots: Optional[int] = None
-        ) -> None:        
+        ) -> None:
+        """
+        Generate visualizations of role networks for specified simulation steps.
+
+        Args:
+            network_ids: List of specific network IDs to plot, or None for all
+            world_ids: List of specific world IDs to plot, or None for all
+            steps: Specific steps to plot, or None for automatic selection
+            num_plots: Number of evenly-spaced timesteps to plot, or None for all
+        """
         role_networks_dir = os.path.join(self.plot_dir, 'role_networks')
         os.makedirs(role_networks_dir, exist_ok=True)
 
@@ -725,6 +871,18 @@ def is_light_color(color):
     return luminance > 0.5
 
 def shannon_entropy(proportions: List[float]):
+    """
+    Calculate Shannon entropy for a list of proportions.
+
+    Measures diversity/uncertainty in a distribution. Higher values indicate
+    more even distributions across different categories.
+
+    Args:
+        proportions: List of proportions that sum to 1.0
+
+    Returns:
+        Entropy value (in bits)
+    """
     proportions = np.array(proportions)
     nonzero_proportions = proportions[proportions != 0]
     if len(nonzero_proportions) == 0:
@@ -733,9 +891,31 @@ def shannon_entropy(proportions: List[float]):
     return entropy
 
 def add_evolutionary_activity_columns(df, snap_interval=None):
-    df['phenotype_activity'] = df.groupby(['world_id', 'phenotype']).cumcount() + 1
-    df['phenotype_cum_pop'] = df.groupby(['world_id', 'phenotype'])['pop'].cumsum()
+    """
+    Add evolutionary activity metrics to a phenotypes dataframe.
 
+    Calculates various activity metrics including persistence, cumulative population,
+    growth rates, and selection differentials at both phenotype and role levels.
+
+    Args:
+        df: Phenotypes dataframe with world_id, step_num, phenotype, role, and pop columns
+        snap_interval: Steps between shadow model resets; used to zero out selection
+                      metrics at reset points
+
+    Returns:
+        DataFrame with added evolutionary activity columns
+    """
+
+    # Track how long each phenotype has persisted
+    df['phenotype_activity'] = df.groupby(['world_id', 'phenotype']).cumcount() + 1
+    # Calculate cumulative population for each phenotype
+    df['phenotype_cum_pop'] = df.groupby(['world_id', 'phenotype'])['pop'].cumsum()
+    # Calculate growth rates based on previous step's population
+    df['phenotype_prev_pop'] = df.groupby(['world_id', 'phenotype'])['pop'].shift(1)
+    df['phenotype_growth_rate'] = np.where(df['phenotype_prev_pop'] > 0,
+                                         (df['pop'] - df['phenotype_prev_pop']) / df['phenotype_prev_pop'],
+                                         0)
+    # Calculate non-neutral activity (delta N) for phenotypes
     df['phenotype_expected_prop'] = df.groupby(['world_id', 'phenotype'])['pop'].shift(1) / df.groupby(['world_id', 'step_num'])['pop'].transform('sum').groupby(df['world_id']).shift(1)
     df['phenotype_observed_prop'] = df['pop'] / df.groupby(['world_id', 'step_num'])['pop'].transform('sum')
     df['phenotype_delta_N'] = np.where(df['phenotype_observed_prop'] > df['phenotype_expected_prop'],
@@ -744,6 +924,7 @@ def add_evolutionary_activity_columns(df, snap_interval=None):
                                     0)
     df = df.drop(['phenotype_expected_prop', 'phenotype_observed_prop'], axis=1)
 
+    # Similar calculations but at the role level
     df['role_step'] = df.groupby(['world_id', 'role', 'step_num']).ngroup()
     df['role_activity'] = df.groupby(['world_id', 'role'])['role_step'].transform(lambda x: pd.factorize(x)[0] + 1)
     df = df.drop('role_step', axis=1)
@@ -751,30 +932,100 @@ def add_evolutionary_activity_columns(df, snap_interval=None):
     df['role_pop'] = df.groupby(['world_id', 'step_num', 'role'])['pop'].transform('sum')
     df['role_cum_pop'] = df.groupby(['world_id', 'role'])['pop'].transform('cumsum')
 
+    df['role_prev_pop'] = df.groupby(['world_id', 'role'])['role_pop'].shift(1)
+    df['role_growth_rate'] = np.where(df['role_prev_pop'] > 0,
+                                    (df['role_pop'] - df['role_prev_pop']) / df['role_prev_pop'],
+                                    0)
+    # Non-neutral activity (delta N) for roles
     df['role_expected_prop'] = df.groupby(['world_id', 'role'])['role_pop'].shift(1) / df.groupby(['world_id', 'step_num'])['pop'].transform('sum').groupby(df['world_id']).shift(1)
     df['role_observed_prop'] = df['role_pop'] / df.groupby(['world_id', 'step_num'])['pop'].transform('sum')
     df['role_delta_N'] = np.where(df['role_observed_prop'] > df['role_expected_prop'],
                                df.groupby(['world_id', 'step_num'])['pop'].transform('sum') *
                                (df['role_observed_prop'] - df['role_expected_prop'])**2,
                                0)
-    df = df.drop(['role_expected_prop', 'role_observed_prop', 'role_pop'], axis=1)
+    # Zero out metrics at shadow model reset points
     if snap_interval is not None:
-        df.loc[df['step_num'] % snap_interval == 0, 'role_delta_N'] = 0
-        df.loc[df['step_num'] % snap_interval == 0, 'phenotype_delta_N'] = 0
+        snap_steps = df['step_num'] % snap_interval == 0
+        zero_columns = ['role_delta_N', 'phenotype_delta_N', 'phenotype_growth_rate', 'role_growth_rate']
+        df.loc[snap_steps, zero_columns] = 0
+
+    df = df.drop(['role_expected_prop', 'role_observed_prop', 'role_pop','phenotype_prev_pop', 'role_prev_pop'], axis=1)
 
     return df
 
+def identify_adaptive_entities(selection_df, shadow_df, component='role', metric='pop', percentile=0.9):
+    """
+    Identify entities that show evidence of adaptation compared to the shadow model.
+
+    Entities are considered adaptive if their selection metric exceeds a threshold
+    determined by the distribution of the same metric in the shadow model.
+
+    Args:
+        selection_df: DataFrame containing selection model data
+        shadow_df: DataFrame containing shadow (neutral) model data
+        component: Entity type to analyze ('role' or 'phenotype')
+        metric: Column name of the metric used to identify adaptation
+        percentile: Threshold percentile from shadow model distribution
+
+    Returns:
+        tuple: (dict of adaptive entities by world, series of proportion of adaptive entities)
+    """
+
+    # Calculate total metric value for each entity in both models
+    shadow_metric = shadow_df.groupby(['world_id', component])[metric].sum()
+    selection_metric = selection_df.groupby(['world_id', component])[metric].sum()
+
+    # Calculate threshold from shadow model distribution
+    threshold = shadow_metric.groupby('world_id').quantile(percentile)
+
+    # Identify entities exceeding threshold in each world
+    adaptive_entities = {
+        'selection': {world_id: selection_metric.xs(world_id, level=0)[selection_metric.xs(world_id, level=0) > threshold]
+                         for world_id, threshold in threshold.items()},
+        'shadow': {world_id: shadow_metric.xs(world_id, level=0)[shadow_metric.xs(world_id, level=0) > threshold]
+                            for world_id, threshold in threshold.items()}
+    }
+
+    # Calculate proportion of adaptive entities in each world
+    proportions = pd.Series([
+            len(adaptive_entities['selection'][world_id])/len(selection_metric.xs(world_id, level=0))
+            for world_id in threshold.index
+        ], index=threshold.index)
+
+    return adaptive_entities, proportions
+
 def calculate_evolutionary_activity_stats(df):
+    """
+    Calculate summary statistics for evolutionary activity across timesteps.
+
+    Aggregates and summarizes various evolutionary metrics including activity,
+    population, diversity and selection measures at each timestep.
+
+    Args:
+        df: DataFrame with evolutionary activity columns (from add_evolutionary_activity_columns)
+
+    Returns:
+        DataFrame with summary statistics by world_id and step_num
+    """
+
+    # Group data by world and timestep
     grouped = df.groupby(['world_id', 'step_num'])
+
+    # Calculate summary statistics for phenotypes
     phenotype_acum = grouped['phenotype_activity'].sum()
     phenotype_pcum = grouped['phenotype_cum_pop'].sum()
     phenotype_nunique = grouped['phenotype'].nunique()
+
+    # Calculate summary statistics for roles
     role_acum = grouped['role_activity'].sum()
     role_pcum = grouped['role_cum_pop'].sum()
     role_nunique = grouped['role'].nunique()
+
+    # Calculate non-neutral activity metrics
     phenotype_delta_N = grouped['phenotype_delta_N'].sum()
     role_delta_N = grouped['role_delta_N'].sum()
 
+    # Calculate diversity metrics (Shannon entropy)
     phenotype_entropy = []
     role_entropy = []
 
@@ -786,6 +1037,7 @@ def calculate_evolutionary_activity_stats(df):
         role_proportions = role_pop / pop_sum
         role_entropy.append(shannon_entropy(role_proportions))
 
+    # Combine all metrics into a single dataframe
     stats_df = pd.DataFrame({
         'world_id': phenotype_acum.index.get_level_values('world_id'),
         'step_num': phenotype_acum.index.get_level_values('step_num'),
@@ -808,6 +1060,18 @@ def calculate_evolutionary_activity_stats(df):
     return stats_df
 
 def plot_world_data(df, shadow_df, world_ids, target_column):
+    """
+    Create comparative plots of selection and shadow model data for specified worlds.
+
+    For each world ID, generates a plot showing the target column's values over time
+    for both selection and shadow (neutral) models.
+
+    Args:
+        df: DataFrame containing selection model data
+        shadow_df: DataFrame containing shadow (neutral) model data
+        world_ids: List of world IDs to plot
+        target_column: Column name to plot on y-axis
+    """
     for world_id in world_ids:
         filtered_df = df[df['world_id'] == world_id]
         filtered_shadow_df = shadow_df[shadow_df['world_id'] == world_id]
@@ -832,6 +1096,21 @@ def gen_activity_plots(
     dest: str = '',
     id_list: list = None
 ) -> None:
+    """
+    Generate scatter plots of evolutionary activity for each world.
+
+    Creates plots showing activity metrics over time for specified worlds,
+    with options to save the plots to disk.
+
+    Args:
+        df: DataFrame containing activity data
+        wd: Dictionary mapping world IDs to network IDs
+        activity_col: Column name of activity metric to plot
+        save: Whether to save plots to disk
+        suffix: String to append to filenames if saving
+        dest: Destination directory if saving
+        id_list: Specific world IDs to plot, or None for all worlds
+    """
     if id_list is None:
         id_list = [i for i in df['world_id'].unique()]
 
@@ -849,76 +1128,251 @@ def gen_activity_plots(
         else:
             plt.show()
 
-def get_CAD(df: pd.DataFrame, activity_col: str) -> pd.DataFrame:
-    cad_df = df.groupby(['step_num', activity_col]).size().unstack(fill_value=0)
-    return cad_df
-
-def CAD_plot(
-    df: pd.DataFrame,
-    s_df: pd.DataFrame,
-    activity_col: str,
-    title: str,
-) -> None:
-    CAD = get_CAD(df, activity_col).sum()
-    sCAD = get_CAD(s_df, activity_col).sum()
-
-    total = CAD.sum() + sCAD.sum()
-
-    CAD = CAD / total
-    sCAD = sCAD / total
-
-    CAD.plot(loglog=True, title=title)
-    sCAD.plot(loglog=True, title=title)
-    plt.show()
 
 class EvolutionaryActivityStatsPlot(BasePlot):
+    """
+    Generates plots comparing evolutionary activity metrics between selection and shadow models.
+
+    This class calculates and visualizes various evolutionary statistics including diversity,
+    accumulation metrics, selection differentials, and adaptive entity counts. Each metric
+    is plotted to show the difference between the selection model and the neutral shadow model,
+    highlighting evidence of evolutionary adaptation.
+    """
+
+    title_map = {
+        # Basic evolutionary activity metrics
+        'phenotype_acum': 'Phenotype Cumulative Activity',
+        'phenotype_acum_mean': 'Mean Phenotype Cumulative Activity',
+        'phenotype_pcum': 'Phenotype Cumulative Population',
+        'phenotype_pcum_mean': 'Mean Phenotype Cumulative Population',
+        'role_acum': 'Role Cumulative Activity',
+        'role_acum_mean': 'Mean Role Cumulative Activity',
+        'role_pcum': 'Role Cumulative Population',
+        'role_pcum_mean': 'Mean Role Cumulative Population',
+
+        # Diversity metrics
+        'phenotype_diversity': 'Phenotype Diversity',
+        'role_diversity': 'Role Diversity',
+        'phenotype_entropy': 'Phenotype Entropy',
+        'role_entropy': 'Role Entropy',
+
+        # Non-Netural Activity metrics
+        'phenotype_delta_N': 'Phenotype Non-Netural Activity',
+        'role_delta_N': 'Role Non-Netural Activity',
+
+        # Novel adaptive entity metrics
+        'novel_adaptive_roles_pop': 'Novel Adaptive Roles (by population count)',
+        'novel_adaptive_roles_activity': 'Novel Adaptive Roles (by activity counter)',
+        'novel_adaptive_roles_delta_N': 'Novel Adaptive Roles (by selection pressure)',
+        'novel_adaptive_roles_growth_rate': 'Novel Adaptive Roles (by growth rate)',
+        'novel_adaptive_phenotypes_pop': 'Novel Adaptive Phenotypes (by population count)',
+        'novel_adaptive_phenotypes_activity': 'Novel Adaptive Phenotypes (by activity counter)',
+        'novel_adaptive_phenotypes_delta_N': 'Novel Adaptive Phenotypes (by selection pressure)',
+        'novel_adaptive_phenotypes_growth_rate': 'Novel Adaptive Phenotypes (by growth rate)'
+    }
+
+    ylabel_map = {
+        # Basic evolutionary activity metrics
+        'phenotype_acum': 'Cumulative Activity Count',
+        'phenotype_acum_mean': 'Mean Activity Count per Phenotype',
+        'phenotype_pcum': 'Cumulative Population',
+        'phenotype_pcum_mean': 'Mean Population per Phenotype',
+        'role_acum': 'Cumulative Activity Count',
+        'role_acum_mean': 'Mean Activity Count per Role',
+        'role_pcum': 'Cumulative Population',
+        'role_pcum_mean': 'Mean Population per Role',
+
+        # Diversity metrics
+        'phenotype_diversity': 'Number of Phenotypes',
+        'role_diversity': 'Number of Roles',
+        'phenotype_entropy': 'Shannon Entropy',
+        'role_entropy': 'Shannon Entropy',
+
+        # Selection metrics
+        'phenotype_delta_N': 'Non-Netural Activity',
+        'role_delta_N': 'Non-Netural Activity',
+
+        # Novel adaptive entity metrics
+        'novel_adaptive_roles_pop': 'Number of Novel Adaptive Roles',
+        'novel_adaptive_roles_activity': 'Number of Novel Adaptive Roles',
+        'novel_adaptive_roles_delta_N': 'Number of Novel Adaptive Roles',
+        'novel_adaptive_roles_growth_rate': 'Number of Novel Adaptive Roles',
+        'novel_adaptive_phenotypes_pop': 'Number of Novel Adaptive Phenotypes',
+        'novel_adaptive_phenotypes_activity': 'Number of Novel Adaptive Phenotypes',
+        'novel_adaptive_phenotypes_delta_N': 'Number of Novel Adaptive Phenotypes',
+        'novel_adaptive_phenotypes_growth_rate': 'Number of Novel Adaptive Phenotypes'
+    }
+
     def __init__(self, db_loc: str, db_name: str, output_directory: str) -> None:
         super().__init__(db_loc, db_name, output_directory)
 
-    def plot(self, columns_to_plot=None):
+    def prepare_stats_df(self, world_id, percentile=0.9):
+        snap_interval = self.params.loc[self.params['world_id'] == world_id, 'snap_interval'].iloc[0]
+
+        df = db.get_phenotypes_df(self.db_path, shadow=False, worlds=world_id)
+        s_df = db.get_phenotypes_df(self.db_path, shadow=True, worlds=world_id)
+
+        if df.empty or s_df.empty:
+            return None, None
+
+        df = add_evolutionary_activity_columns(df)
+        s_df = add_evolutionary_activity_columns(s_df, snap_interval=snap_interval)
+
+        stats_df = calculate_evolutionary_activity_stats(df)
+        s_stats_df = calculate_evolutionary_activity_stats(s_df)
+
+        standard_metrics = [
+            'pop',
+            'delta_N',
+            'growth_rate',
+            'activity'
+        ]
+
+        for entity_type in ['role', 'phenotype']:
+            for base_metric in standard_metrics:
+                if base_metric == 'pop':
+                    metric_name = base_metric
+                else:
+                    metric_name = f"{entity_type}_{base_metric}"
+
+                novel_col = f"novel_adaptive_{entity_type}s_{base_metric}"
+
+                adaptive_entities, _ = identify_adaptive_entities(
+                    df, s_df,
+                    component=entity_type,
+                    metric=metric_name,
+                    percentile=percentile
+                )
+                for model_type, model_df, stats in [('selection', df, stats_df), ('shadow', s_df, s_stats_df)]:
+                    stats[novel_col] = 0
+                    adaptive_set = adaptive_entities[model_type].get(world_id, pd.Series()).index
+
+                    if len(adaptive_set) > 0:
+                        appearances = model_df[model_df[entity_type].isin(adaptive_set)].groupby(entity_type)['step_num'].min()
+                        counts = appearances.reset_index().groupby('step_num').size()
+
+                        for step, count in counts.items():
+                            stats.loc[stats['step_num'] == step, novel_col] = count
+
+        return stats_df, s_stats_df
+
+    def plot(self, columns_to_plot=None, column_groups=None, percentile=0.9):
+        """
+        Create evolutionary activity comparison plots for all worlds.
+
+        For each world in the database, generates comparison plots showing both
+        selection and shadow model data for specified evolutionary metrics.
+
+        Args:
+            columns_to_plot: List of specific metrics to plot, or None for defaults
+            column_groups: Groups of related metrics to plot together, or None for
+                          individual plots
+            percentile: Threshold percentile for identifying adaptive entities
+        """
         if columns_to_plot is None:
-            columns_to_plot = [
+            eas_columns = [
                 'phenotype_acum', 'phenotype_acum_mean', 'phenotype_pcum', 'phenotype_pcum_mean',
                 'role_acum', 'role_acum_mean', 'role_pcum', 'role_pcum_mean',
                 'phenotype_diversity', 'role_diversity', 'phenotype_entropy', 'role_entropy',
                 'phenotype_delta_N', 'role_delta_N'
             ]
+            novelty_columns = []
+            for entity_type in ['role', 'phenotype']:
+                for base_metric in ['pop', 'delta_N', 'growth_rate', 'activity']:
+                    adaptive_metrics.append(f"novel_adaptive_{entity_type}s_{base_metric}")
+
+            columns_to_plot = eas_columns + novelty_columns
 
         for world_id, network_id in self.world_dict.items():
-            df = db.get_phenotypes_df(self.db_path, shadow=False, worlds=world_id)
-            s_df = db.get_phenotypes_df(self.db_path, shadow=True, worlds=world_id)
-
-            if df.empty or s_df.empty:
+            stats_df, s_stats_df = self.prepare_stats_df(world_id, percentile)
+            if stats_df is None or s_stats_df is None:
+                logging.info(f"Skipping plots for World {world_id} (Network {network_id}) - no data available")
                 continue
-
-            df = add_evolutionary_activity_columns(df)
-            s_df = add_evolutionary_activity_columns(s_df)
-
-            stats_df = calculate_evolutionary_activity_stats(df)
-            s_stats_df = calculate_evolutionary_activity_stats(s_df)
-
-            self.plot_stats(stats_df, s_stats_df, world_id, network_id, columns_to_plot)
+            if column_groups is not None:
+                self.plot_grouped_stats(stats_df, s_stats_df, world_id, network_id, column_groups)
+            else:
+                self.plot_stats(stats_df, s_stats_df, world_id, network_id, columns_to_plot)
 
     def plot_stats(self, stats_df: pd.DataFrame, s_stats_df: pd.DataFrame, world_id: int, network_id: int, columns_to_plot: List[str]):
         for column in columns_to_plot:
             plt.figure(figsize=(6.5, 4.875))
             plt.plot(stats_df['step_num'], stats_df[column], label='Selection', color='blue')
             plt.plot(s_stats_df['step_num'], s_stats_df[column], label='Neutral Shadow', color='gray')
-            plt.title(f"{column.replace('_', ' ').title()}\nNetwork: {network_id}, World: {world_id}")
+            plt.title(f"{self.title_map.get(column, column.replace('_', ' ').title())}\nNetwork: {network_id}, World: {world_id}")
             plt.xlabel("Step")
-            plt.ylabel(column.replace('_', ' ').title())
+            plt.ylabel(self.ylabel_map.get(column, column.replace('_', ' ').title()))
             plt.legend()
 
             filename = f"{self.plot_dir}/{column}_n{network_id}w{world_id}.png"
             plt.savefig(filename, dpi=300)
             plt.close()
 
+    def plot_grouped_stats(self, stats_df: pd.DataFrame, s_stats_df: pd.DataFrame, world_id: int, network_id: int, column_groups: List[Union[List[str], Dict[str, Any]]]):
+        for group_idx, columns in enumerate(column_groups):
+            # Check if the group is a dict with title and columns
+            if isinstance(group, dict) and 'columns' in group:
+                columns = group['columns']
+                group_title = group.get('title')  # Use None if 'title' key doesn't exist
+            else:
+                # If it's just a list of columns, use no title
+                columns = group
+                group_title = None
+
+            num_cols = len(columns)
+
+            fig, axes = plt.subplots(num_cols, 1, figsize=(6.5, 3*num_cols), sharex=True)
+            if num_cols == 1:
+                axes = [axes]
+
+            for ax, column in zip(axes, columns):
+                ax.plot(stats_df['step_num'], stats_df[column], label='Selection', color='blue')
+                ax.plot(s_stats_df['step_num'], s_stats_df[column], label='Neutral Shadow', color='gray')
+                ax.set_ylabel(self.ylabel_map.get(column, column.replace('_', ' ').title()))
+                ax.legend()
+
+            if group_title is not None:
+                fig.suptitle(f"{group_title}\nNetwork: {network_id}, World: {world_id}")
+            else:
+                fig.suptitle(f"Network: {network_id}, World: {world_id}")
+
+            axes[-1].set_xlabel("Step")
+
+            plt.tight_layout()
+            plt.subplots_adjust(top=0.9, hspace=0.3)
+
+            filename = f"{self.plot_dir}/grouped_stats_n{network_id}w{world_id}_group{group_idx}.png"
+            plt.savefig(filename, dpi=300)
+            plt.close()
+
+
+def get_CAD(df: pd.DataFrame, activity_col: str) -> pd.DataFrame:
+    cad_df = df.groupby(['step_num', activity_col]).size().unstack(fill_value=0)
+    return cad_df
+
+
 class CADPlot(BasePlot):
+    """
+    Generates Cumulative Activity Distribution plots for evolutionary activity metrics.
+
+    CAD plots show the frequency distribution of activity values on a log-log scale,
+    allowing comparison between selection and shadow models to identify evidence of
+    evolutionary adaptation through differences in their distributions.
+    """
     def __init__(self, db_loc: str, db_name: str, output_directory: str) -> None:
         super().__init__(db_loc, db_name, output_directory)
         self.world_dict = db.get_world_dict(self.db_path)
 
     def plot(self, activity_columns=None):
+        """
+        Create CAD plots for specified activity metrics across all worlds.
+
+        For each world and activity metric, generates a log-log plot comparing
+        the cumulative frequency distributions of the selection and shadow models.
+
+        Args:
+            activity_columns: List of activity metrics to plot, or None for defaults
+                            (defaults to phenotype/role activity and cumulative population)
+        """
         if activity_columns is None:
             activity_columns = ['phenotype_activity', 'phenotype_cum_pop', 'role_activity', 'role_cum_pop']
 
@@ -1056,6 +1510,13 @@ def run_analysis_from_config(args):
         logging.info("Finished function: {function_name}".format(function_name=function_name))
 
 def main():
+    """
+    Main entry point for the analysis script.
+
+    Reads the configuration file specified as command-line argument,
+    finds all databases in the target directory, and executes analysis
+    tasks on each database, potentially in parallel.
+    """
     if len(sys.argv) < 2:
         print("Usage: python script.py <config_file>")
         sys.exit(1)
