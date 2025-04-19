@@ -14,7 +14,7 @@ import model.database as db
 import model.output as out
 from datetime import datetime
 from multiprocessing import Pool
-from typing import Any, Dict, List, Set, Tuple, Iterator, Callable, Optional
+from typing import Any, Dict, List, Set, Tuple, Iterator, Callable, Optional, Union
 from tqdm import tqdm
 
 class BasePlot:
@@ -905,55 +905,92 @@ def add_evolutionary_activity_columns(df, snap_interval=None):
     Returns:
         DataFrame with added evolutionary activity columns
     """
+    # Convert float64 columns to float32 to reduce memory usage
+    for col in df.select_dtypes(include=['float64']).columns:
+        df[col] = df[col].astype('float32')
 
-    # Track how long each phenotype has persisted
-    df['phenotype_activity'] = df.groupby(['world_id', 'phenotype']).cumcount() + 1
-    # Calculate cumulative population for each phenotype
-    df['phenotype_cum_pop'] = df.groupby(['world_id', 'phenotype'])['pop'].cumsum()
+    # Compute total population per (world_id, step_num)
+    step_totals = df.groupby(['world_id', 'step_num'])['pop'].sum()
+    # Get previous step's total population per world (used for proportion-based metrics)
+    prev_step_totals = step_totals.groupby(level=0).shift(1)
+
+    # PHENOTYPE-LEVEL CALCULATIONS (these work correctly at row level)
+    # ---------------------------------------------------------------------
+    df['total_pop'] = df.set_index(['world_id', 'step_num']).index.map(step_totals)
+    df['prev_total_pop'] = df.set_index(['world_id', 'step_num']).index.map(prev_step_totals)
     # Calculate growth rates based on previous step's population
     df['phenotype_prev_pop'] = df.groupby(['world_id', 'phenotype'])['pop'].shift(1)
     df['phenotype_growth_rate'] = np.where(df['phenotype_prev_pop'] > 0,
                                          (df['pop'] - df['phenotype_prev_pop']) / df['phenotype_prev_pop'],
                                          0)
     # Calculate non-neutral activity (delta N) for phenotypes
-    df['phenotype_expected_prop'] = df.groupby(['world_id', 'phenotype'])['pop'].shift(1) / df.groupby(['world_id', 'step_num'])['pop'].transform('sum').groupby(df['world_id']).shift(1)
-    df['phenotype_observed_prop'] = df['pop'] / df.groupby(['world_id', 'step_num'])['pop'].transform('sum')
+    df['phenotype_expected_prop'] = np.where(df['prev_total_pop'] > 0,
+                                        df['phenotype_prev_pop'] / df['prev_total_pop'],
+                                        0)
+    df['phenotype_observed_prop'] = df['pop'] / df['total_pop']
     df['phenotype_delta_N'] = np.where(df['phenotype_observed_prop'] > df['phenotype_expected_prop'],
-                                    df.groupby(['world_id', 'step_num'])['pop'].transform('sum') *
-                                    (df['phenotype_observed_prop'] - df['phenotype_expected_prop'])**2,
-                                    0)
-    df = df.drop(['phenotype_expected_prop', 'phenotype_observed_prop'], axis=1)
+                                      df['total_pop'] *
+                                      (df['phenotype_observed_prop'] - df['phenotype_expected_prop'])**2,
+                                      0)
+    df = df.drop(['phenotype_expected_prop', 'phenotype_observed_prop', 'phenotype_prev_pop', 'total_pop', 'prev_total_pop'], axis=1)
+    # Track how long each phenotype has persisted
+    df['phenotype_activity'] = df.groupby(['world_id', 'phenotype']).cumcount() + 1
+    # Calculate cumulative population for each phenotype
+    df['phenotype_cum_pop'] = df.groupby(['world_id', 'phenotype'])['pop'].cumsum()
 
-    # Similar calculations but at the role level
-    df['role_step'] = df.groupby(['world_id', 'role', 'step_num']).ngroup()
-    df['role_activity'] = df.groupby(['world_id', 'role'])['role_step'].transform(lambda x: pd.factorize(x)[0] + 1)
-    df = df.drop('role_step', axis=1)
+    # ROLE-LEVEL CALCULATIONS (use a temporary aggregated dataframe)
+    # ---------------------------------------------------------------------
+    # Create temporary dataframe with role-level aggregations
+    temp_role_df = df.groupby(['world_id', 'step_num', 'role'])['pop'].sum().reset_index(name='role_pop')
+    temp_role_df = temp_role_df.sort_values(['world_id', 'role', 'step_num'])
+    # Add total_pop and prev_total_pop to temp_role_df via mapping
+    temp_role_df['total_pop'] = temp_role_df.set_index(['world_id', 'step_num']).index.map(step_totals)
+    temp_role_df['prev_total_pop'] = temp_role_df.set_index(['world_id', 'step_num']).index.map(prev_step_totals)
+    # Calculate previous step's role population
+    temp_role_df['role_prev_pop'] = temp_role_df.groupby(['world_id', 'role'])['role_pop'].shift(1)
+    # Calculate role-level delta_N
+    temp_role_df['role_expected_prop'] = np.where(
+        temp_role_df['prev_total_pop'] > 0,
+        temp_role_df['role_prev_pop'] / temp_role_df['prev_total_pop'],
+        0
+    )
+    temp_role_df['role_observed_prop'] = temp_role_df['role_pop'] / temp_role_df['total_pop']
+    temp_role_df['role_delta_N'] = np.where(
+        temp_role_df['role_observed_prop'] > temp_role_df['role_expected_prop'],
+        temp_role_df['total_pop'] * (temp_role_df['role_observed_prop'] - temp_role_df['role_expected_prop'])**2,
+        0
+    )
+    temp_role_df = temp_role_df.drop(['role_expected_prop', 'role_observed_prop'], axis=1)
+    # Calculate role activity (persistence counter)
+    temp_role_df['role_activity'] = temp_role_df.groupby(['world_id', 'role']).cumcount() + 1
+    # Calculate cumulative population correctly at role level
+    temp_role_df['role_cum_pop'] = temp_role_df.groupby(['world_id', 'role'])['role_pop'].cumsum()
+    # Calculate role growth rate
+    temp_role_df['role_growth_rate'] = np.where(
+        temp_role_df['role_prev_pop'] > 0,
+        (temp_role_df['role_pop'] - temp_role_df['role_prev_pop']) / temp_role_df['role_prev_pop'],
+        0
+    )
+    # Merge role-level metrics back to the main dataframe
+    role_metrics = temp_role_df[['world_id', 'step_num', 'role', 'role_delta_N',
+                                 'role_cum_pop', 'role_activity', 'role_growth_rate']]
+    df = pd.merge(df, role_metrics, on=['world_id', 'step_num', 'role'], how='left')
+    del temp_role_df
+    del role_metrics
 
-    df['role_pop'] = df.groupby(['world_id', 'step_num', 'role'])['pop'].transform('sum')
-    df['role_cum_pop'] = df.groupby(['world_id', 'role'])['pop'].transform('cumsum')
-
-    df['role_prev_pop'] = df.groupby(['world_id', 'role'])['role_pop'].shift(1)
-    df['role_growth_rate'] = np.where(df['role_prev_pop'] > 0,
-                                    (df['role_pop'] - df['role_prev_pop']) / df['role_prev_pop'],
-                                    0)
-    # Non-neutral activity (delta N) for roles
-    df['role_expected_prop'] = df.groupby(['world_id', 'role'])['role_pop'].shift(1) / df.groupby(['world_id', 'step_num'])['pop'].transform('sum').groupby(df['world_id']).shift(1)
-    df['role_observed_prop'] = df['role_pop'] / df.groupby(['world_id', 'step_num'])['pop'].transform('sum')
-    df['role_delta_N'] = np.where(df['role_observed_prop'] > df['role_expected_prop'],
-                               df.groupby(['world_id', 'step_num'])['pop'].transform('sum') *
-                               (df['role_observed_prop'] - df['role_expected_prop'])**2,
-                               0)
-    # Zero out metrics at shadow model reset points
+    # Zero out differential metrics at shadow model reset points and first step
+    first_step = df['step_num'].min()
     if snap_interval is not None:
-        snap_steps = df['step_num'] % snap_interval == 0
-        zero_columns = ['role_delta_N', 'phenotype_delta_N', 'phenotype_growth_rate', 'role_growth_rate']
-        df.loc[snap_steps, zero_columns] = 0
+        snap_steps = (df['step_num'] % snap_interval == 0) | (df['step_num'] == first_step)
+    else:
+        snap_steps = df['step_num'] == first_step
 
-    df = df.drop(['role_expected_prop', 'role_observed_prop', 'role_pop','phenotype_prev_pop', 'role_prev_pop'], axis=1)
+    zero_columns = ['role_delta_N', 'phenotype_delta_N', 'phenotype_growth_rate', 'role_growth_rate']
+    df.loc[snap_steps, zero_columns] = 0
 
     return df
 
-def identify_adaptive_entities(selection_df, shadow_df, component='role', metric='pop', percentile=0.9):
+def identify_adaptive_entities(selection_df, shadow_df, component='role', metric='growth_rate', percentile=0.99):
     """
     Identify entities that show evidence of adaptation compared to the shadow model.
 
@@ -970,10 +1007,15 @@ def identify_adaptive_entities(selection_df, shadow_df, component='role', metric
     Returns:
         tuple: (dict of adaptive entities by world, series of proportion of adaptive entities)
     """
+    # Choose aggregation method based on metric name
+    if 'activity' in metric:
+        agg_method = 'max'  # Use max for activity metrics - shows persistence
+    else:
+        agg_method = 'sum'  # Use sum for other metrics (pop, delta_N, growth_rate)
 
     # Calculate total metric value for each entity in both models
-    shadow_metric = shadow_df.groupby(['world_id', component])[metric].sum()
-    selection_metric = selection_df.groupby(['world_id', component])[metric].sum()
+    shadow_metric = shadow_df.groupby(['world_id', component])[metric].agg(agg_method)
+    selection_metric = selection_df.groupby(['world_id', component])[metric].agg(agg_method)
 
     # Calculate threshold from shadow model distribution
     threshold = shadow_metric.groupby('world_id').quantile(percentile)
@@ -1016,14 +1058,8 @@ def calculate_evolutionary_activity_stats(df):
     phenotype_pcum = grouped['phenotype_cum_pop'].sum()
     phenotype_nunique = grouped['phenotype'].nunique()
 
-    # Calculate summary statistics for roles
-    role_acum = grouped['role_activity'].sum()
-    role_pcum = grouped['role_cum_pop'].sum()
-    role_nunique = grouped['role'].nunique()
-
     # Calculate non-neutral activity metrics
     phenotype_delta_N = grouped['phenotype_delta_N'].sum()
-    role_delta_N = grouped['role_delta_N'].sum()
 
     # Calculate diversity metrics (Shannon entropy)
     phenotype_entropy = []
@@ -1036,6 +1072,17 @@ def calculate_evolutionary_activity_stats(df):
         role_pop = group.groupby('role')['pop'].sum()
         role_proportions = role_pop / pop_sum
         role_entropy.append(shannon_entropy(role_proportions))
+
+    # Role-level metrics (need to aggregate by role first to avoid duplication)
+    role_df = df.drop_duplicates(subset=['world_id', 'step_num', 'role'])[
+        ['world_id', 'step_num', 'role', 'role_activity', 'role_cum_pop', 'role_delta_N']
+    ]
+
+    role_grouped = role_df.groupby(['world_id', 'step_num'])
+    role_acum = role_grouped['role_activity'].sum()
+    role_pcum = role_grouped['role_cum_pop'].sum()
+    role_nunique = role_grouped['role'].nunique()
+    role_delta_N = role_grouped['role_delta_N'].sum()
 
     # Combine all metrics into a single dataframe
     stats_df = pd.DataFrame({
@@ -1163,11 +1210,11 @@ class EvolutionaryActivityStatsPlot(BasePlot):
         # Novel adaptive entity metrics
         'novel_adaptive_roles_pop': 'Novel Adaptive Roles (by population count)',
         'novel_adaptive_roles_activity': 'Novel Adaptive Roles (by activity counter)',
-        'novel_adaptive_roles_delta_N': 'Novel Adaptive Roles (by selection pressure)',
+        'novel_adaptive_roles_delta_N': 'Novel Adaptive Roles (by non-neutral activity)',
         'novel_adaptive_roles_growth_rate': 'Novel Adaptive Roles (by growth rate)',
         'novel_adaptive_phenotypes_pop': 'Novel Adaptive Phenotypes (by population count)',
         'novel_adaptive_phenotypes_activity': 'Novel Adaptive Phenotypes (by activity counter)',
-        'novel_adaptive_phenotypes_delta_N': 'Novel Adaptive Phenotypes (by selection pressure)',
+        'novel_adaptive_phenotypes_delta_N': 'Novel Adaptive Phenotypes (by non-neutral activity)',
         'novel_adaptive_phenotypes_growth_rate': 'Novel Adaptive Phenotypes (by growth rate)'
     }
 
@@ -1193,20 +1240,20 @@ class EvolutionaryActivityStatsPlot(BasePlot):
         'role_delta_N': 'Non-Netural Activity',
 
         # Novel adaptive entity metrics
-        'novel_adaptive_roles_pop': 'Number of Novel Adaptive Roles',
-        'novel_adaptive_roles_activity': 'Number of Novel Adaptive Roles',
-        'novel_adaptive_roles_delta_N': 'Number of Novel Adaptive Roles',
-        'novel_adaptive_roles_growth_rate': 'Number of Novel Adaptive Roles',
-        'novel_adaptive_phenotypes_pop': 'Number of Novel Adaptive Phenotypes',
-        'novel_adaptive_phenotypes_activity': 'Number of Novel Adaptive Phenotypes',
-        'novel_adaptive_phenotypes_delta_N': 'Number of Novel Adaptive Phenotypes',
-        'novel_adaptive_phenotypes_growth_rate': 'Number of Novel Adaptive Phenotypes'
+        'novel_adaptive_roles_pop': 'Novel by Pop',
+        'novel_adaptive_roles_activity': 'Novel by Activity',
+        'novel_adaptive_roles_delta_N': 'Novel by Delta N',
+        'novel_adaptive_roles_growth_rate': 'Novel by Growth Rate',
+        'novel_adaptive_phenotypes_pop': 'Novel by Pop',
+        'novel_adaptive_phenotypes_activity': 'Novel by Activity',
+        'novel_adaptive_phenotypes_delta_N': 'Novel by Delta N',
+        'novel_adaptive_phenotypes_growth_rate': 'Novel by Growth Rate'
     }
 
     def __init__(self, db_loc: str, db_name: str, output_directory: str) -> None:
         super().__init__(db_loc, db_name, output_directory)
 
-    def prepare_stats_df(self, world_id, percentile=0.9):
+    def prepare_stats_df(self, world_id, percentile=0.95):
         snap_interval = self.params.loc[self.params['world_id'] == world_id, 'snap_interval'].iloc[0]
 
         df = db.get_phenotypes_df(self.db_path, shadow=False, worlds=world_id)
@@ -1256,7 +1303,7 @@ class EvolutionaryActivityStatsPlot(BasePlot):
 
         return stats_df, s_stats_df
 
-    def plot(self, columns_to_plot=None, column_groups=None, percentile=0.9):
+    def plot(self, columns_to_plot=None, column_groups=None, percentile=0.95):
         """
         Create evolutionary activity comparison plots for all worlds.
 
@@ -1270,18 +1317,7 @@ class EvolutionaryActivityStatsPlot(BasePlot):
             percentile: Threshold percentile for identifying adaptive entities
         """
         if columns_to_plot is None:
-            eas_columns = [
-                'phenotype_acum', 'phenotype_acum_mean', 'phenotype_pcum', 'phenotype_pcum_mean',
-                'role_acum', 'role_acum_mean', 'role_pcum', 'role_pcum_mean',
-                'phenotype_diversity', 'role_diversity', 'phenotype_entropy', 'role_entropy',
-                'phenotype_delta_N', 'role_delta_N'
-            ]
-            novelty_columns = []
-            for entity_type in ['role', 'phenotype']:
-                for base_metric in ['pop', 'delta_N', 'growth_rate', 'activity']:
-                    adaptive_metrics.append(f"novel_adaptive_{entity_type}s_{base_metric}")
-
-            columns_to_plot = eas_columns + novelty_columns
+            columns_to_plot = self.title_map.keys()
 
         for world_id, network_id in self.world_dict.items():
             stats_df, s_stats_df = self.prepare_stats_df(world_id, percentile)
@@ -1296,8 +1332,8 @@ class EvolutionaryActivityStatsPlot(BasePlot):
     def plot_stats(self, stats_df: pd.DataFrame, s_stats_df: pd.DataFrame, world_id: int, network_id: int, columns_to_plot: List[str]):
         for column in columns_to_plot:
             plt.figure(figsize=(6.5, 4.875))
-            plt.plot(stats_df['step_num'], stats_df[column], label='Selection', color='blue')
             plt.plot(s_stats_df['step_num'], s_stats_df[column], label='Neutral Shadow', color='gray')
+            plt.plot(stats_df['step_num'], stats_df[column], label='Selection', color='blue')
             plt.title(f"{self.title_map.get(column, column.replace('_', ' ').title())}\nNetwork: {network_id}, World: {world_id}")
             plt.xlabel("Step")
             plt.ylabel(self.ylabel_map.get(column, column.replace('_', ' ').title()))
@@ -1308,7 +1344,7 @@ class EvolutionaryActivityStatsPlot(BasePlot):
             plt.close()
 
     def plot_grouped_stats(self, stats_df: pd.DataFrame, s_stats_df: pd.DataFrame, world_id: int, network_id: int, column_groups: List[Union[List[str], Dict[str, Any]]]):
-        for group_idx, columns in enumerate(column_groups):
+        for group_idx, group in enumerate(column_groups):
             # Check if the group is a dict with title and columns
             if isinstance(group, dict) and 'columns' in group:
                 columns = group['columns']
@@ -1325,8 +1361,8 @@ class EvolutionaryActivityStatsPlot(BasePlot):
                 axes = [axes]
 
             for ax, column in zip(axes, columns):
-                ax.plot(stats_df['step_num'], stats_df[column], label='Selection', color='blue')
                 ax.plot(s_stats_df['step_num'], s_stats_df[column], label='Neutral Shadow', color='gray')
+                ax.plot(stats_df['step_num'], stats_df[column], label='Selection', color='blue')
                 ax.set_ylabel(self.ylabel_map.get(column, column.replace('_', ' ').title()))
                 ax.legend()
 
@@ -1338,7 +1374,7 @@ class EvolutionaryActivityStatsPlot(BasePlot):
             axes[-1].set_xlabel("Step")
 
             plt.tight_layout()
-            plt.subplots_adjust(top=0.9, hspace=0.3)
+            plt.subplots_adjust(top=0.9, hspace=0.1)
 
             filename = f"{self.plot_dir}/grouped_stats_n{network_id}w{world_id}_group{group_idx}.png"
             plt.savefig(filename, dpi=300)
