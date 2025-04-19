@@ -942,6 +942,8 @@ def add_evolutionary_activity_columns(df, snap_interval=None):
     # ---------------------------------------------------------------------
     # Create temporary dataframe with role-level aggregations
     temp_role_df = df.groupby(['world_id', 'step_num', 'role'])['pop'].sum().reset_index(name='role_pop')
+    # Drop zero-pop roles before computing activity
+    temp_role_df = temp_role_df[temp_role_df['role_pop'] > 0]
     temp_role_df = temp_role_df.sort_values(['world_id', 'role', 'step_num'])
     # Add total_pop and prev_total_pop to temp_role_df via mapping
     temp_role_df['total_pop'] = temp_role_df.set_index(['world_id', 'step_num']).index.map(step_totals)

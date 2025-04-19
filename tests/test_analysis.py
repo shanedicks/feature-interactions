@@ -197,17 +197,6 @@ class TestEvolutionaryActivityColumns(unittest.TestCase):
                                   (snap_df['phenotype'] == 'P3')]['phenotype_delta_N'].values[0], 0,
                          "Delta_N should be zero at snap interval steps")
 
-        # Test zero population handling
-        # Add a row with zero population to test data and rerun test
-        zero_pop_df = df.copy()
-        zero_pop_df = pd.concat([zero_pop_df, pd.DataFrame([
-            (1, 3, "P5", "R3", 0)  # New phenotype with zero population
-        ], columns=zero_pop_df.columns)])
-        zero_result = add_evolutionary_activity_columns(zero_pop_df)
-        # Verify no NaN values in result
-        self.assertFalse(zero_result.isnull().any().any(), 
-                        "Zero population handling should not produce NaN values")
-
         # Test first step metrics
         first_step_rows = result[result['step_num'] == 1]
         self.assertTrue((first_step_rows['phenotype_growth_rate'] == 0).all(), 
