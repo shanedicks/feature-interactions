@@ -12,6 +12,7 @@ import pandas as pd
 import seaborn as sns
 import model.database as db
 import model.output as out
+from model.rolesets import FeatureUtilityCalculator, RoleAnalyzer
 from datetime import datetime
 from multiprocessing import Pool
 from typing import Any, Dict, List, Set, Tuple, Iterator, Callable, Optional, Union
@@ -1450,6 +1451,168 @@ class CADPlot(BasePlot):
         plt.savefig(filename, dpi=300)
         plt.close()
 
+
+class RolesetPlot(BasePlot):
+    """
+    Generates visualizations of role categories (possible, viable, adjacent,
+    occupiable, occupied) at different model time steps.
+
+    Uses the RoleAnalyzer from rolesets.py to analyze the adaptive
+    landscape and plot how different role categories change over time.
+    """
+
+    def __init__(self, db_loc: str, db_name: str, output_directory: str) -> None:
+        super().__init__(db_loc, db_name, output_directory)
+
+    def plot(self, world_ids=None, num_steps=10, sites=None):
+        """
+        Create plots showing role category counts over time.
+
+        For each world, plots the number of roles in each category
+        (possible, viable, adjacent, occupiable, occupied) at evenly spaced
+        time steps.
+
+        Args:
+            world_ids: List of specific world IDs to plot, or None for all worlds
+            num_steps: Number of evenly-spaced time steps to analyze
+            sites: Specific sites to analyze, or None for all sites
+        """
+
+        # If world_ids is None, use all worlds
+        if world_ids is None:
+            world_ids = list(self.world_dict.keys())
+        elif isinstance(world_ids, int):
+            world_ids = [world_ids]
+
+        # For each world, create feature calculator and analyzer
+        for world_id in world_ids:
+            logging.info(f"Trying world {world_id}...")
+            network_id = self.world_dict[world_id]
+
+            # Create utility calculator and analyzer
+            calculator = FeatureUtilityCalculator(self.db_path)
+            analyzer = RoleAnalyzer(calculator)
+
+            # Get evenly spaced steps for analysis
+            steps = self.get_evenly_spaced_steps(num_steps)
+
+            # Get sites for this world if not specified
+            world_sites = sites
+            if world_sites is None:
+                sites_dict = db.get_sites_dict(self.db_path)
+                if world_id in sites_dict:
+                    world_sites = list(sites_dict[world_id].keys())
+                else:
+                    continue  # Skip this world if no sites found
+
+            # Evaluate rolesets for this world
+            roleset_data = analyzer.evaluate_rolesets(world_id, steps)
+
+            if roleset_data.empty:
+                logging.info(f"No roleset data available for World {world_id}")
+                continue
+
+            # Create plots
+            self.plot_roleset_categories(roleset_data, world_id, network_id)
+            self.plot_roleset_ratios(roleset_data, world_id, network_id)
+
+            logging.info(f"World {world_id} complete")
+
+    def get_evenly_spaced_steps(self, num_steps: int) -> List[int]:
+        """Get evenly spaced step numbers from the database."""
+        # Reusing the method from NetworkPlot
+        all_steps = db.get_steps_list(self.db_path)
+        if num_steps >= len(all_steps):
+            return all_steps
+        interval = max(len(all_steps) // num_steps, 1)
+        selected_steps = all_steps[::interval]
+        selected_steps.append(all_steps[-1])  # Always include the last step
+        return sorted(list(set(selected_steps)))  # Remove duplicates and sort
+
+    def plot_roleset_categories(self, roleset_data, world_id, network_id):
+        """
+        Plot the absolute counts of roles in each category over time.
+
+        Args:
+            roleset_data: DataFrame containing roleset evaluation results
+            world_id: ID of the world being plotted
+            network_id: ID of the network the world belongs to
+        """
+        # Aggregate data by step (mean across sites)
+        step_data = roleset_data.groupby('step').agg({
+            'possible': 'mean',
+            'sustainable': 'mean',
+            'adjacent': 'mean',
+            'occupiable': 'mean',
+            'occupied': 'mean'
+        }).reset_index()
+
+        plt.figure(figsize=(6.5, 4.875))
+
+        # Plot each category
+        plt.plot(step_data['step'], step_data['possible'], label='Possible', color='lightgray')
+        plt.plot(step_data['step'], step_data['sustainable'], label='Sustainable', color='blue')  # Updated label
+        plt.plot(step_data['step'], step_data['adjacent'], label='Adjacent', color='green')
+        plt.plot(step_data['step'], step_data['occupiable'], label='Occupiable', color='orange')
+        plt.plot(step_data['step'], step_data['occupied'], label='Occupied', color='red')
+
+        plt.title(f"Role Categories Over Time\nNetwork: {network_id}, World: {world_id}")
+        plt.xlabel('Step')
+        plt.ylabel('Number of Roles')
+        plt.yscale('log')  # Log scale often works well for these numbers
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+
+        # Save the figure
+        filename = f"{self.plot_dir}/roleset_categories_n{network_id}w{world_id}.png"
+        plt.savefig(filename, dpi=300)
+        plt.close()
+
+    def plot_roleset_ratios(self, roleset_data, world_id, network_id):
+        """
+        Plot the ratios between different role categories over time.
+
+        Args:
+            roleset_data: DataFrame containing roleset evaluation results
+            world_id: ID of the world being plotted
+            network_id: ID of the network the world belongs to
+        """
+        # Aggregate data by step (max across sites)
+        step_data = roleset_data.groupby('step').agg({
+            'possible': 'max',
+            'sustainable': 'max',
+            'adjacent': 'max',
+            'occupiable': 'max',
+            'occupied': 'max'
+        }).reset_index()
+
+        # Calculate ratios
+        step_data['sustainable_ratio'] = step_data['sustainable'] / step_data['possible']  # Updated name
+        step_data['adjacent_ratio'] = step_data['adjacent'] / step_data['possible']
+        step_data['occupiable_ratio'] = step_data['occupiable'] / step_data['adjacent']
+        step_data['occupation_ratio'] = step_data['occupied'] / step_data['occupiable']
+
+        plt.figure(figsize=(6.5, 4.875))
+
+        # Plot each ratio
+        plt.plot(step_data['step'], step_data['sustainable_ratio'], label='Sustainable/Possible', color='blue')  # Updated label
+        plt.plot(step_data['step'], step_data['adjacent_ratio'], label='Adjacent/Possible', color='green')
+        plt.plot(step_data['step'], step_data['occupiable_ratio'], label='Occupiable/Adjacent', color='orange')
+        plt.plot(step_data['step'], step_data['occupation_ratio'], label='Occupied/Occupiable', color='red')
+
+        plt.title(f"Role Category Ratios Over Time\nNetwork: {network_id}, World: {world_id}")
+        plt.xlabel('Step')
+        plt.ylabel('Ratio')
+        plt.ylim(0, 1)
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+
+        # Save the figure
+        filename = f"{self.plot_dir}/roleset_ratios_n{network_id}w{world_id}.png"
+        plt.savefig(filename, dpi=300)
+        plt.close()
 
 def database_cleanup(db_loc, db_name):
     db_path = os.path.join(db_loc, db_name)

@@ -393,16 +393,16 @@ def get_world_dict(db_path) -> Dict[int, int]:
 
 def get_sites_dict(db_path) -> Dict[int, Dict[Tuple[int, int], List[str]]]:
     sql = """
-        SELECT spacetime.site_pos,
+        SELECT DISTINCT spacetime.site_pos,
                spacetime.world_id,
                traits.name AS trait_name,
                features.name AS feature_name
-        FROM environment
-        JOIN spacetime ON environment.spacetime_id = spacetime.spacetime_id
-        JOIN traits ON environment.trait_id = traits.trait_id
-        JOIN features ON traits.feature_id = features.feature_id
-        GROUP BY spacetime.site_pos, spacetime.world_id, traits.name, features.name;
-    """
+        FROM spacetime
+        LEFT JOIN environment ON environment.spacetime_id = spacetime.spacetime_id
+        LEFT JOIN traits ON environment.trait_id = traits.trait_id
+        LEFT JOIN features ON traits.feature_id = features.feature_id
+        WHERE spacetime.site_pos != 'world'
+   """
     df = get_df(db_path, sql)
     df['feature_trait'] = df['feature_name'] + '.' + df['trait_name']
     sites_dict = {}
@@ -410,7 +410,8 @@ def get_sites_dict(db_path) -> Dict[int, Dict[Tuple[int, int], List[str]]]:
     for (world_id, site_pos), group in grouped:
         if world_id not in sites_dict:
             sites_dict[world_id] = {}
-        sites_dict[world_id][site_pos] = group['feature_trait'].tolist()
+        traits_list = group['feature_trait'].dropna().tolist()
+        sites_dict[world_id][site_pos] = traits_list
 
     return sites_dict
 
@@ -528,6 +529,17 @@ def get_feature_changes_df(
     FROM feature_changes AS FC
     JOIN features AS F ON F.feature_id = FC.feature_id
     JOIN spacetime AS S ON S.spacetime_id = FC.spacetime_id;
+    """
+    return get_df(db_path, sql)
+
+def get_trait_changes_df(db_path: str) -> pd.DataFrame:
+    sql = """
+    SELECT S.world_id, S.step_num, TC.trait_id, T.name AS trait_name, T.feature_id,
+           F.name AS feature_name, F.env, TC.change
+    FROM trait_changes AS TC
+    JOIN traits AS T ON T.trait_id = TC.trait_id
+    JOIN features AS F ON F.feature_id = T.feature_id
+    JOIN spacetime AS S ON S.spacetime_id = TC.spacetime_id;
     """
     return get_df(db_path, sql)
 
