@@ -314,19 +314,21 @@ class ModelVarsPlot(BasePlot):
             fig, ax = plt.subplots(figsize=(6.5, 3.656))
 
             network_ids = set(self.world_dict.values())
-            cmap = plt.cm.get_cmap('tab20', len(network_ids))
+            cmap = plt.cm.tab20
             network_colors = {nid: cmap(i % 20) for i, nid in enumerate(sorted(network_ids))}
+
+            legend_elements = []
+            for network_id, color in sorted(network_colors.items()):
+                legend_elements.append(plt.Line2D([0], [0], color=color, label=f"N{network_id}"))
 
             for world_id, network_id in self.world_dict.items():
                 if world_id in df.columns:
-                    base_color = network_colors[network_id]
-                    color_variation = 0.8 + (world_id % 20) / 100
-                    world_color = [min(1.0, c * color_variation) for c in base_color]
+                    world_color = network_colors[network_id]
 
                     df[world_id].ewm(span=100).mean().plot(
                         ax=ax,
                         color=world_color,
-                        label=f"N{network_id}/W{world_id}"
+                        label=f"_nolegend_"
                     )
 
             name = self.DEFAULT_PLOT_COLUMNS.get(column, column)
@@ -335,12 +337,14 @@ class ModelVarsPlot(BasePlot):
             ax.set_xlabel("Step", fontsize=10)
             ax.set_ylabel(name, fontsize=10)
             ax.tick_params(axis='both', which='major', labelsize=10)
-            if len(df.columns) > 10:
-                ax.legend(fontsize=8, ncol=2)
-            else:
-                ax.legend(fontsize=10)
-            plt.tight_layout()
-            plt.savefig(f"{self.plot_dir}/{column}_all_networks.png", dpi=300)
+            ax.legend(
+                loc='center left',
+                bbox_to_anchor=(1, 0.5),
+                handles=legend_elements,
+                fontsize=10
+            )
+            plt.subplots_adjust(right=0.85)
+            plt.savefig(f"{self.plot_dir}/{column}_all_networks.png", dpi=300, bbox_inches='tight')
             plt.close(fig)
 
 
