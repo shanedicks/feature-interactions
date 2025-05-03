@@ -1393,6 +1393,89 @@ def get_CAD(df: pd.DataFrame, activity_col: str) -> pd.DataFrame:
     return cad_df
 
 
+class ActivityWavePlot(BasePlot):
+    """
+    Generates scatter plots showing evolutionary activity metrics over time.
+    These plots show the "waves" of activity as different phenotypes or roles
+    appear, spread, and potentially disappear throughout the simulation.
+
+    Creates separate plots for selection and shadow models, similar to PopulationPlot.
+    """
+
+    def __init__(self, db_loc: str, db_name: str, output_directory: str) -> None:
+        super().__init__(db_loc, db_name, output_directory)
+
+    def plot(self, activity_columns=None, world_ids=None):
+        """
+        Create activity wave plots for specified activity metrics across selected worlds.
+        Generates separate plots for selection and shadow models.
+
+        Args:
+            activity_columns: List of activity metrics to plot, or None for defaults
+                            (defaults to phenotype/role activity and cumulative population)
+            world_ids: List of specific world IDs to plot, or None for all worlds
+        """
+        if activity_columns is None:
+            activity_columns = ['phenotype_activity', 'phenotype_cum_pop',
+                              'role_activity', 'role_cum_pop']
+
+        if world_ids is None:
+            world_ids = list(self.world_dict.keys())
+        elif isinstance(world_ids, int):
+            world_ids = [world_ids]
+
+        # Process both selection (shadow=False) and shadow (shadow=True) data
+        for shadow in [False, True]:
+            for world_id in world_ids:
+                network_id = self.world_dict[world_id]
+
+                # Get phenotypes data
+                df = db.get_phenotypes_df(self.db_path, shadow=shadow, worlds=world_id)
+                if df.empty:
+                    logging.info(f"No {'shadow' if shadow else 'selection'} data for world {world_id}")
+                    continue
+
+                # Add evolutionary activity columns
+                if shadow:
+                    snap_interval = self.params.loc[
+                        self.params['world_id'] == world_id, 'snap_interval'
+                    ].iloc[0] if not self.params.empty else None
+
+                    df = add_evolutionary_activity_columns(df, snap_interval=snap_interval)
+                else:
+                    df = add_evolutionary_activity_columns(df)
+
+                # Create plots for each activity column
+                for activity_col in activity_columns:
+                    if activity_col not in df.columns:
+                        logging.warning(f"Column {activity_col} not found in data for world {world_id}")
+                        continue
+
+                    self.create_activity_plot(df, activity_col, world_id, network_id, shadow)
+
+    def create_activity_plot(self, df, activity_col, world_id, network_id, shadow):
+        """Create a single activity wave plot."""
+        plt.figure(figsize=(6.5, 4.875))
+
+        # Plot data
+        df.plot(x='step_num', y=activity_col, kind='scatter',
+               s=0.1, alpha=0.2, ax=plt.gca(), legend=False)
+
+        # Add title
+        model_type = "Shadow" if shadow else "Selection"
+        plt.title(f"{activity_col.replace('_', ' ').title()} ({model_type})\nNetwork: {network_id} | World: {world_id}")
+        plt.xlabel("Step")
+        plt.ylabel(activity_col.replace('_', ' ').title())
+
+        plt.tight_layout()
+
+        # Save the plot with appropriate prefix
+        prefix = "s_" if shadow else ""
+        filename = f"{self.plot_dir}/{prefix}{activity_col}_n{network_id}_w{world_id}.png"
+        plt.savefig(filename, dpi=300)
+        plt.close()
+
+
 class CADPlot(BasePlot):
     """
     Generates Cumulative Activity Distribution plots for evolutionary activity metrics.
@@ -1435,16 +1518,18 @@ class CADPlot(BasePlot):
     def plot_cad(self, df: pd.DataFrame, s_df: pd.DataFrame, activity_col: str, world_id: int, network_id: int):
         plt.figure(figsize=(6.5, 4.875))
 
-        CAD = get_CAD(df, activity_col).sum()
-        sCAD = get_CAD(s_df, activity_col).sum()
+        entity_type = 'phenotype' if 'phenotype' in activity_col else 'role'
+
+        CAD = df.groupby(entity_type)[activity_col].max().value_counts().sort_index()
+        sCAD = s_df.groupby(entity_type)[activity_col].max().value_counts().sort_index()
 
         total = CAD.sum() + sCAD.sum()
 
         CAD = CAD / total
         sCAD = sCAD / total
 
-        CAD.plot(loglog=True, label='Selection', color='blue')
-        sCAD.plot(loglog=True, label='Neutral Shadow', color='gray')
+        sCAD.ewm(span=20).mean().plot(loglog=True, label='Neutral Shadow', color='gray')
+        CAD.ewm(span=20).mean().plot(loglog=True, label='Selection', color='blue')
 
         plt.title(f"CAD Plot: {activity_col.replace('_', ' ').title()}\nNetwork: {network_id}, World: {world_id}")
         plt.xlabel("Activity")
