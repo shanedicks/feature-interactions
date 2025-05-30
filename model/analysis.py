@@ -1310,7 +1310,7 @@ class EvolutionaryActivityStatsPlot(BasePlot):
 
         return stats_df, s_stats_df
 
-    def plot(self, columns_to_plot=None, column_groups=None, percentile=0.95):
+    def plot(self, world_ids=None, columns_to_plot=None, column_groups=None, percentile=0.95):
         """
         Create evolutionary activity comparison plots for all worlds.
 
@@ -1323,10 +1323,17 @@ class EvolutionaryActivityStatsPlot(BasePlot):
                           individual plots
             percentile: Threshold percentile for identifying adaptive entities
         """
-        if columns_to_plot is None:
-            columns_to_plot = self.title_map.keys()
+        if columns_to_plot and column_groups:
+            raise ValueError("Specify either columns_to_plot or column_groups, not both.")
+        if not columns_to_plot and not column_groups:
+            columns_to_plot = list(self.title_map.keys())
 
-        for world_id, network_id in self.world_dict.items():
+        if world_ids is not None:
+            worlds = {w:n for w,n in self.world_dict.items() if w in world_ids}
+        else:
+            worlds = self.world_dict
+
+        for world_id, network_id in worlds.items():
             stats_df, s_stats_df = self.prepare_stats_df(world_id, percentile)
             if stats_df is None or s_stats_df is None:
                 logging.info(f"Skipping plots for World {world_id} (Network {network_id}) - no data available")
@@ -1336,41 +1343,59 @@ class EvolutionaryActivityStatsPlot(BasePlot):
             else:
                 self.plot_stats(stats_df, s_stats_df, world_id, network_id, columns_to_plot)
 
-    def plot_stats(self, stats_df: pd.DataFrame, s_stats_df: pd.DataFrame, world_id: int, network_id: int, columns_to_plot: List[str]):
+    def plot_stats(
+        self,
+        stats_df: pd.DataFrame,
+        s_stats_df: pd.DataFrame,
+        world_id: int,
+        network_id: int,
+        columns_to_plot: List[str],
+        ylabels: Optional[Dict[str, str]] = None
+    ) -> None:
         for column in columns_to_plot:
             plt.figure(figsize=(6.5, 4.875))
             plt.plot(s_stats_df['step_num'], s_stats_df[column], label='Neutral Shadow', color='gray')
             plt.plot(stats_df['step_num'], stats_df[column], label='Selection', color='blue')
             plt.title(f"{self.title_map.get(column, column.replace('_', ' ').title())}\nNetwork: {network_id}, World: {world_id}")
             plt.xlabel("Step")
-            plt.ylabel(self.ylabel_map.get(column, column.replace('_', ' ').title()))
+            plt.ylabel(ylabels.get(column) if ylabels and column in ylabels else self.ylabel_map.get(column, column.replace('_', ' ').title()))
             plt.legend()
 
             filename = f"{self.plot_dir}/{column}_n{network_id}w{world_id}.png"
             plt.savefig(filename, dpi=300)
             plt.close()
 
-    def plot_grouped_stats(self, stats_df: pd.DataFrame, s_stats_df: pd.DataFrame, world_id: int, network_id: int, column_groups: List[Union[List[str], Dict[str, Any]]]):
+    def plot_grouped_stats(
+        self,
+        stats_df: pd.DataFrame,
+        s_stats_df: pd.DataFrame,
+        world_id: int,
+        network_id: int,
+        column_groups: List[Union[List[str], Dict[str, Any]]],
+        ylabels: Optional[Dict[str, str]] = None
+    ):
         for group_idx, group in enumerate(column_groups):
             # Check if the group is a dict with title and columns
-            if isinstance(group, dict) and 'columns' in group:
-                columns = group['columns']
+            if isinstance(group, dict) and 'plots' in group:
+                plots = group['plots']
                 group_title = group.get('title')  # Use None if 'title' key doesn't exist
             else:
                 # If it's just a list of columns, use no title
-                columns = group
+                plots = [{'column': col} for col in group]
                 group_title = None
 
-            num_cols = len(columns)
+            num_plots = len(plots)
 
-            fig, axes = plt.subplots(num_cols, 1, figsize=(6.5, 3*num_cols), sharex=True)
+            fig, axes = plt.subplots(num_cols, 1, figsize=(6.5, 2*num_cols), sharex=True)
             if num_cols == 1:
                 axes = [axes]
 
-            for ax, column in zip(axes, columns):
-                ax.plot(s_stats_df['step_num'], s_stats_df[column], label='Neutral Shadow', color='gray')
-                ax.plot(stats_df['step_num'], stats_df[column], label='Selection', color='blue')
-                ax.set_ylabel(self.ylabel_map.get(column, column.replace('_', ' ').title()))
+            for ax, plot_cfg in zip(axes, plots):
+                col = plot_cfg['column']
+                ylabel = plot_cfg.get('ylabel', self.ylabel_map.get(col, col.replace('_', ' ').title()))
+                ax.plot(s_stats_df['step_num'], s_stats_df[col], label='Neutral Shadow', color='gray')
+                ax.plot(stats_df['step_num'], stats_df[col], label='Selection', color='blue')
+                ax.set_ylabel(ylabel)
                 ax.legend()
 
             if group_title is not None:
@@ -1640,7 +1665,7 @@ class RolesetPlot(BasePlot):
 
         # Plot each category
         plt.plot(step_data['step'], step_data['possible'], label='Possible', color='lightgray')
-        plt.plot(step_data['step'], step_data['sustainable'], label='Sustainable', color='blue')  # Updated label
+        plt.plot(step_data['step'], step_data['sustainable'], label='Sustainable', color='blue')
         plt.plot(step_data['step'], step_data['adjacent'], label='Adjacent', color='green')
         plt.plot(step_data['step'], step_data['occupiable'], label='Occupiable', color='orange')
         plt.plot(step_data['step'], step_data['occupied'], label='Occupied', color='red')
@@ -1667,18 +1692,19 @@ class RolesetPlot(BasePlot):
             world_id: ID of the world being plotted
             network_id: ID of the network the world belongs to
         """
-        # Aggregate data by step (max across sites)
+        # Aggregate data by step (mean across sites)
         step_data = roleset_data.groupby('step').agg({
-            'possible': 'max',
-            'sustainable': 'max',
-            'adjacent': 'max',
-            'occupiable': 'max',
-            'occupied': 'max'
+            'possible': 'mean',
+            'sustainable': 'mean',
+            'adjacent': 'mean',
+            'occupiable': 'mean',
+            'occupied': 'mean'
         }).reset_index()
 
         # Calculate ratios
-        step_data['sustainable_ratio'] = step_data['sustainable'] / step_data['possible']  # Updated name
+        step_data['sustainable_ratio'] = step_data['sustainable'] / step_data['possible']
         step_data['adjacent_ratio'] = step_data['adjacent'] / step_data['possible']
+        step_data['adjacent2_ratio'] = step_data['adjacent'] / step_data['sustainable']
         step_data['occupiable_ratio'] = step_data['occupiable'] / step_data['adjacent']
         step_data['occupation_ratio'] = step_data['occupied'] / step_data['occupiable']
 
@@ -1687,6 +1713,7 @@ class RolesetPlot(BasePlot):
         # Plot each ratio
         plt.plot(step_data['step'], step_data['sustainable_ratio'], label='Sustainable/Possible', color='blue')  # Updated label
         plt.plot(step_data['step'], step_data['adjacent_ratio'], label='Adjacent/Possible', color='green')
+        plt.plot(step_data['step'], step_data['adjacent2_ratio'], label='Adjacent/Sustainable', color='lightgreen')
         plt.plot(step_data['step'], step_data['occupiable_ratio'], label='Occupiable/Adjacent', color='orange')
         plt.plot(step_data['step'], step_data['occupation_ratio'], label='Occupied/Occupiable', color='red')
 
