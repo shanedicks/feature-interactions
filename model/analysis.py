@@ -1386,8 +1386,8 @@ class EvolutionaryActivityStatsPlot(BasePlot):
 
             num_plots = len(plots)
 
-            fig, axes = plt.subplots(num_cols, 1, figsize=(6.5, 2*num_cols), sharex=True)
-            if num_cols == 1:
+            fig, axes = plt.subplots(num_plots, 1, figsize=(6.5, 2*num_plots), sharex=True)
+            if num_plots == 1:
                 axes = [axes]
 
             for ax, plot_cfg in zip(axes, plots):
