@@ -60,6 +60,13 @@ class PopulationPlot(BasePlot):
     phenotypes and roles in the simulation.
     """
 
+    def filter_top_roles(self, df: pd.DataFrame, num_roles: Optional[int]) -> pd.DataFrame:
+        if num_roles is None:
+            return df
+
+        top_roles = df.groupby('role')['pop'].sum().nlargest(num_roles).index
+        return df[df['role'].isin(top_roles)]
+
     def plot(self, plot_type = 'area', num_types = 1000, world=None):
         """
         Create population distribution plots for phenotypes and roles.
@@ -67,6 +74,7 @@ class PopulationPlot(BasePlot):
         Args:
             plot_type: Type of plot to generate ('area' or 'line')
             num_types: Maximum number of phenotypes to include in the plot
+            num_roles: Maximum number of roles to include in the plot (filters both role and phenotype plots)
             world: Specific world ID to plot, or None for all worlds
         """
         worlds_to_plot = [(world, self.world_dict[world])] if world is not None else self.world_dict.items()
@@ -77,6 +85,8 @@ class PopulationPlot(BasePlot):
                 logging.info(f"Trying world {w}")
                 ph_df = db.get_phenotypes_df(self.db_path, shadow, worlds=w)
                 if not ph_df.empty:
+                    # Apply role filtering if num_roles is specified
+                    ph_df = self.filter_top_roles(ph_df, num_roles)
                     self.save_pivot_fig(ph_df, self.role_pivot, plot_type, shadow, w, n)
                     m = ph_df.groupby('phenotype')['pop'].sum()
                     phenotypes = tuple(m.nlargest(num_types).index)
