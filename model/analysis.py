@@ -65,7 +65,12 @@ class PopulationPlot(BasePlot):
             return df
 
         top_roles = df.groupby('role')['pop'].sum().nlargest(num_roles).index
-        return df[df['role'].isin(top_roles)]
+        logging.info(f"Top {num_roles} roles: {list(top_roles)}")
+
+        filtered_df = df[df['role'].isin(top_roles)]
+        filtered_df['role'] = filtered_df['role'].cat.remove_unused_categories()
+
+        return filtered_df
 
     def plot(self, plot_type = 'area', num_types = 1000, num_roles=None, world=None):
         """
