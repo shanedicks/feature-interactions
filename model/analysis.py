@@ -67,7 +67,7 @@ class PopulationPlot(BasePlot):
         top_roles = df.groupby('role')['pop'].sum().nlargest(num_roles).index
         return df[df['role'].isin(top_roles)]
 
-    def plot(self, plot_type = 'area', num_types = 1000, world=None):
+    def plot(self, plot_type = 'area', num_types = 1000, num_roles=None, world=None):
         """
         Create population distribution plots for phenotypes and roles.
 
