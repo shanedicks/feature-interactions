@@ -69,6 +69,7 @@ class PopulationPlot(BasePlot):
 
         filtered_df = df[df['role'].isin(top_roles)]
         filtered_df['role'] = filtered_df['role'].cat.remove_unused_categories()
+        filtered_df['role'] = filtered_df['role'].cat.reorder_categories(top_roles)
 
         return filtered_df
 
@@ -146,7 +147,7 @@ class PopulationPlot(BasePlot):
 
     def area_pop_plot(self, df: pd.DataFrame, title: str, legend = False) -> None:
         plt.figure(figsize=(6.5, 4.875))
-        ax = df.ewm(span=20).mean().plot.area(legend=legend, colormap='tab20b')
+        ax = df.ewm(span=20).mean().plot.area(legend=legend, colormap='tab20')
         ax.set_title(title, fontsize=12)
         ax.set_xlabel("Step", fontsize=10)
         ax.set_ylabel("Population", fontsize=10)
@@ -155,7 +156,7 @@ class PopulationPlot(BasePlot):
 
     def pop_plot(self, df: pd.DataFrame, title: str, legend = False) -> None:
         plt.figure(figsize=(6.5, 4.875))
-        ax = df.ewm(span=20).mean().plot(legend=legend, colormap='tab20b')
+        ax = df.ewm(span=20).mean().plot(legend=legend, colormap='tab20')
         ax.set_title(title, fontsize=12)
         ax.set_xlabel("Step", fontsize=10)
         ax.set_ylabel("Population", fontsize=10)
