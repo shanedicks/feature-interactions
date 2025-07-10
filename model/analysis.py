@@ -1720,7 +1720,7 @@ class RolesetPlot(BasePlot):
         # Calculate ratios
         step_data['sustainable_ratio'] = step_data['sustainable'] / step_data['possible']
         step_data['adjacent_ratio'] = step_data['adjacent'] / step_data['possible']
-        step_data['adjacent2_ratio'] = step_data['adjacent'] / step_data['sustainable']
+        step_data['occupiable2_ratio'] = step_data['occupiable'] / step_data['sustainable']
         step_data['occupiable_ratio'] = step_data['occupiable'] / step_data['adjacent']
         step_data['occupation_ratio'] = step_data['occupied'] / step_data['occupiable']
 
@@ -1729,7 +1729,7 @@ class RolesetPlot(BasePlot):
         # Plot each ratio
         plt.plot(step_data['step'], step_data['sustainable_ratio'], label='Sustainable/Possible', color='blue')  # Updated label
         plt.plot(step_data['step'], step_data['adjacent_ratio'], label='Adjacent/Possible', color='green')
-        plt.plot(step_data['step'], step_data['adjacent2_ratio'], label='Adjacent/Sustainable', color='lightgreen')
+        plt.plot(step_data['step'], step_data['occupiable2_ratio'], label='Adjacent/Sustainable', color='purple')
         plt.plot(step_data['step'], step_data['occupiable_ratio'], label='Occupiable/Adjacent', color='orange')
         plt.plot(step_data['step'], step_data['occupation_ratio'], label='Occupied/Occupiable', color='red')
 
