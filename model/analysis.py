@@ -66,10 +66,11 @@ class PopulationPlot(BasePlot):
 
         top_roles = df.groupby('role')['pop'].sum().nlargest(num_roles).index
         logging.info(f"Top {num_roles} roles: {list(top_roles)}")
-
-        filtered_df = df[df['role'].isin(top_roles)]
-        filtered_df['role'] = filtered_df['role'].cat.remove_unused_categories()
-        filtered_df['role'] = filtered_df['role'].cat.reorder_categories(top_roles)
+        filtered_df = df[df['role'].isin(top_roles)].copy()
+        top_roles_sorted = sorted(top_roles)
+        filtered_df['role'] = pd.Categorical(filtered_df['role'], categories=list(top_roles_sorted), ordered=True)
+        logging.info(f"Categorical categories: {list(filtered_df['role'].cat.categories)}")
+        logging.info(f"Number of categories: {len(filtered_df['role'].cat.categories)}")
 
         return filtered_df
 
